@@ -68,7 +68,7 @@ class Recorder:
     def start(self, url, seconds, mode, quality):
         with self.lock:
             if self.thread and self.thread.is_alive():
-                raise RuntimeError("Recording pehle se chal rahi hai. Pehle Stop karo.")
+                raise RuntimeError("A recording is already running. Stop it first.")
             self.stop_event.clear()
             self.error = ""
             self.title = ""
@@ -83,7 +83,7 @@ class Recorder:
         self.stop_event.set()
         proc = self.proc
         if proc and proc.poll() is None:
-            self._log("Stop request: current clip finalize ho rahi hai...")
+            self._log("Stop requested: finalizing the current clip...")
             try:
                 proc.stdin.write("q")
                 proc.stdin.flush()
@@ -121,12 +121,12 @@ class Recorder:
                     info = ydl.extract_info(url, download=False)
                 if extra.get("cookiesfrombrowser"):
                     self.browser = label
-                    self._log(f"{label} browser ki cookies se stream mil gayi.")
+                    self._log(f"Stream found using {label} browser cookies.")
                 return info
             except Exception as e:
                 last_err = e
                 if len(attempts) > 1:
-                    self._log(f"{label}: fail, agla try kar raha hoon...")
+                    self._log(f"{label}: failed, trying next option...")
         raise last_err
 
     def _completed_count(self):
@@ -170,7 +170,7 @@ class Recorder:
             retries = 0
             while not self.stop_event.is_set():
                 self.state = "fetching"
-                self._log("Stream info nikal raha hoon (yt-dlp)...")
+                self._log("Fetching stream info (yt-dlp)...")
                 info = self._extract(url, quality)
                 is_live = bool(info.get("is_live"))
 
@@ -179,12 +179,12 @@ class Recorder:
                     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                     self.session_dir = os.path.join(CLIPS_DIR, f"{stamp}_{safe_name(self.title)}")
                     os.makedirs(self.session_dir, exist_ok=True)
-                    self._log(f"Title: {self.title} | Live: {'Haan' if is_live else 'Nahi (normal video)'}")
+                    self._log(f"Title: {self.title} | Live: {'Yes' if is_live else 'No (regular video)'}")
                     self._log(f"Clips folder: {self.session_dir}")
 
                 cmd = self._build_cmd(info, seconds, mode, self._completed_count())
                 self.state = "recording"
-                self._log(f"Recording shuru — har {seconds}s ki 9:16 clip banegi.")
+                self._log(f"Recording started — a 9:16 clip will be created every {seconds}s.")
                 self.proc = subprocess.Popen(
                     cmd,
                     stdin=subprocess.PIPE,
@@ -212,15 +212,15 @@ class Recorder:
                 if self.stop_event.is_set():
                     break
                 if not is_live:
-                    self._log("Video khatam — saari clips ban gayi.")
+                    self._log("Video finished — all clips created.")
                     break
                 retries += 1
                 if retries > 20:
-                    raise RuntimeError("Stream se baar-baar connection toot raha hai, ruk gaya.")
-                self._log(f"ffmpeg ruk gaya (code {code}). 5s me reconnect kar raha hoon... ({retries})")
+                    raise RuntimeError("Stream connection keeps dropping, giving up.")
+                self._log(f"ffmpeg stopped (code {code}). Reconnecting in 5s... ({retries})")
                 time.sleep(5)
             self.state = "stopped"
-            self._log("Recording band.")
+            self._log("Recording stopped.")
         except Exception as e:
             self.error = str(e)
             self.state = "error"
@@ -273,7 +273,7 @@ def api_start():
     data = request.get_json(force=True)
     url = (data.get("url") or "").strip()
     if not re.match(r"^https?://", url):
-        return jsonify(error="Sahi YouTube link daalo."), 400
+        return jsonify(error="Please enter a valid YouTube link."), 400
     seconds = max(5, min(180, int(data.get("seconds", 30))))
     mode = data.get("mode", "blur")
     quality = int(data.get("quality", 1080))
@@ -319,5 +319,5 @@ def serve_clip(session, name):
 
 if __name__ == "__main__":
     print(f"ffmpeg: {FFMPEG}")
-    print("Browser me kholo: http://127.0.0.1:5000")
+    print("Open in browser: http://127.0.0.1:5000")
     app.run(host="127.0.0.1", port=5000, debug=False, threaded=True)

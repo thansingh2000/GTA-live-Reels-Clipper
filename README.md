@@ -1,23 +1,23 @@
 # GTA Live → 9:16 Reels Clipper
 
-YouTube live (ya normal video) ka link daalo — tool stream ko record karke har N second ki **1080x1920 (9:16) reel clips** banata hai aur browser me apne aap download karta jaata hai.
+Paste a YouTube live (or regular video) link — the tool records the stream, cuts it into **1080x1920 (9:16) reel clips** every N seconds, and downloads them automatically in your browser.
 
 ## Requirements
 
 - Windows 10/11
-- [Python 3.10+](https://www.python.org/downloads/) (install karte waqt **"Add Python to PATH"** tick karna)
-- [Node.js](https://nodejs.org/) (recommended — YouTube ke saare formats ke liye yt-dlp isko use karta hai)
-- Koi browser jisme **YouTube login** ho (is PC par **Brave** kaam karta hai)
+- [Python 3.10+](https://www.python.org/downloads/) (tick **"Add Python to PATH"** during install)
+- [Node.js](https://nodejs.org/) (recommended — yt-dlp uses it to get all YouTube formats)
+- A browser where you are **logged in to YouTube** (Brave or Firefox work best)
 
-`ffmpeg` alag se install karne ki zarurat nahi — `imageio-ffmpeg` package apne saath laata hai.
+No separate `ffmpeg` install is needed — the `imageio-ffmpeg` package ships its own binary.
 
-## Setup + Run (aasan tarika)
+## Setup + Run (easy way)
 
-`start.bat` par double-click karo. Ye:
+Double-click `start.bat`. It will:
 
-1. `venv` bana dega (pehli baar)
-2. Saari dependencies install / update karega
-3. Server start karke browser me http://127.0.0.1:5000 khol dega
+1. Create a `venv` (first run only)
+2. Install / update all dependencies
+3. Start the server and open http://127.0.0.1:5000 in your browser
 
 ## Setup + Run (manual)
 
@@ -30,53 +30,53 @@ pip install -U "yt-dlp[default]"
 python app.py
 ```
 
-Phir browser me kholo: http://127.0.0.1:5000
+Then open: http://127.0.0.1:5000
 
-## Use kaise karein
+## How to use
 
-1. YouTube live link paste karo.
-2. **Clip length** chuno (15–90 sec).
-3. **9:16 Style** chuno:
-   - **Full gameplay + blur background** — poora gameplay beech me, upar-neeche blur (reels ke liye best)
-   - **Center crop** — beech ka hissa full screen
-   - **Zoom fill** — frame zoom karke screen bhar do
-4. **Source quality** — PC slow ho to 720p lo.
-5. **YouTube cookies** — "Auto" rehne do; tool khud browser dhoondh lega.
-6. **Start** dabao. Har clip bante hi UI me preview aayega aur auto-download hoga.
-   - Pehli baar browser "multiple downloads" ki permission maangega → **Allow** karo.
-7. **Stop** dabane par chalu clip bhi save hokar band hoga.
+1. Paste the YouTube live link.
+2. Choose the **Clip length** (15–90 sec).
+3. Choose the **9:16 Style**:
+   - **Full gameplay + blur background** — full gameplay in the middle, blurred fill above and below (best for reels)
+   - **Center crop** — the center of the frame, full screen
+   - **Zoom fill** — zooms the frame to fill the screen
+4. **Source quality** — pick 720p on a slower PC.
+5. **YouTube cookies** — leave on "Auto"; the tool finds a working browser by itself.
+6. Press **Start**. Each clip shows up in the UI with a preview and is auto-downloaded.
+   - The first time, the browser asks permission for "multiple downloads" → click **Allow**.
+7. Press **Stop** — the clip in progress is saved before recording ends.
 
-Saari clips yahan bhi save hoti hain:
+All clips are also saved here:
 
 ```
 d:\tool\clips\<date_time>_<stream_title>\clip_0000.mp4, clip_0001.mp4, ...
 ```
 
-UI me **📁 Folder kholo** button se seedha khul jaata hai.
+The **📁 Open folder** button in the UI opens it directly.
 
-## Problems aur solution
+## Troubleshooting
 
 | Problem | Solution |
 | --- | --- |
-| `Sign in to confirm you're not a bot` | Browser me YouTube login karo aur cookies "Auto"/Brave rakho. Phir bhi na chale to neeche `cookies.txt` wala tarika use karo. |
-| `Could not copy Chrome cookie database` | Chrome/Edge ki cookies yt-dlp nahi padh paata. Brave ya Firefox use karo, ya `cookies.txt`. |
-| Log me `speed=` 1x se kam | PC live se peeche hai — quality 720p karo ya "Center crop" style lo. |
-| Stream ruk gaya | Tool 5 second me khud reconnect karta hai, numbering wahi se continue hoti hai. |
-| YouTube extraction error achanak aane lage | `.\venv\Scripts\pip install -U "yt-dlp[default]"` chalao (ya bas `start.bat` dubara chalao). |
+| `Sign in to confirm you're not a bot` | Log in to YouTube in your browser and keep cookies on "Auto" (or pick the browser). If it still fails, use the `cookies.txt` method below. |
+| `Could not copy Chrome cookie database` | yt-dlp can't read Chrome/Edge cookies. Use Brave or Firefox, or `cookies.txt`. |
+| `speed=` below 1x in the log | Your PC is falling behind the live stream — switch to 720p or the "Center crop" style. |
+| Stream stopped | The tool reconnects automatically after 5 seconds and continues the clip numbering. |
+| YouTube extraction errors suddenly appear | Run `.\venv\Scripts\pip install -U "yt-dlp[default]"` (or just run `start.bat` again). |
 
-### cookies.txt tarika
+### cookies.txt method
 
-1. Browser me "Get cookies.txt LOCALLY" extension install karo.
-2. youtube.com kholo (login ke saath) aur cookies export karo.
-3. File ko `d:\tool\cookies.txt` naam se save karo — tool isko apne aap use karega.
+1. Install the "Get cookies.txt LOCALLY" browser extension.
+2. Open youtube.com (logged in) and export the cookies.
+3. Save the file as `d:\tool\cookies.txt` — the tool picks it up automatically.
 
 ## Project structure
 
 ```
 d:\tool
-├── app.py              # Flask backend: yt-dlp + ffmpeg recording / clipping
-├── templates\index.html# Web UI
+├── app.py               # Flask backend: yt-dlp + ffmpeg recording / clipping
+├── templates\index.html # Web UI
 ├── requirements.txt
-├── start.bat           # One-click setup + run
-└── clips\              # Bani hui reels
+├── start.bat            # One-click setup + run
+└── clips\               # Generated reels
 ```

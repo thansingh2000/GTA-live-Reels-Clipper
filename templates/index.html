@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="hi">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -43,7 +43,7 @@
 <body>
 <header>
   <h1>🎮 GTA Live → 9:16 Reels Clipper</h1>
-  <span>YouTube live link daalo, clips apne aap cut hokar download hongi</span>
+  <span>Paste a YouTube live link — clips are cut and downloaded automatically</span>
 </header>
 <main>
   <section class="card">
@@ -51,7 +51,7 @@
     <input id="url" placeholder="https://www.youtube.com/watch?v=...  ya  https://youtube.com/live/...">
     <div class="row">
       <div>
-        <label>Har clip ki length</label>
+        <label>Clip length</label>
         <select id="seconds">
           <option value="15">15 sec</option>
           <option value="30" selected>30 sec</option>
@@ -82,17 +82,17 @@
       </div>
     </div>
     <div style="margin-top:14px; max-width:420px;">
-      <label>YouTube cookies (agar "not a bot" error aaye) — browser me YouTube login hona chahiye</label>
+      <label>YouTube cookies (for "not a bot" errors) — you must be logged in to YouTube in that browser</label>
       <select id="browser">
-        <option value="">Auto (khud dhoondho / cookies.txt)</option>
-        <option value="firefox">Firefox (sabse reliable)</option>
+        <option value="">Auto (detect / cookies.txt)</option>
+        <option value="firefox">Firefox (most reliable)</option>
         <option value="chrome">Chrome</option>
         <option value="edge">Edge</option>
         <option value="brave">Brave</option>
         <option value="opera">Opera</option>
       </select>
     </div>
-    <label class="check"><input type="checkbox" id="autodl" checked> Nayi clip bante hi browser me auto-download karo</label>
+    <label class="check"><input type="checkbox" id="autodl" checked> Auto-download each new clip in the browser</label>
     <div class="err" id="err"></div>
   </section>
 
@@ -102,7 +102,7 @@
       <strong id="stateTxt">Idle</strong>
       <span style="color:var(--mut); font-size:13px;" id="titleTxt"></span>
       <span style="flex:1"></span>
-      <button class="ghost" id="folderBtn">📁 Folder kholo</button>
+      <button class="ghost" id="folderBtn">📁 Open folder</button>
     </div>
     <div class="log" id="log"></div>
   </section>
@@ -110,13 +110,13 @@
   <section class="card">
     <strong>Clips (<span id="count">0</span>)</strong>
     <div class="grid" id="clips"></div>
-    <div class="empty" id="empty">Abhi koi clip nahi bani. Start dabao — pehli clip ~clip length ke baad aayegi.</div>
+    <div class="empty" id="empty">No clips yet. Press Start — the first clip appears after about one clip length.</div>
   </section>
 </main>
 
 <script>
 const $ = id => document.getElementById(id);
-const STATE_TXT = { idle:"Idle", starting:"Start ho raha hai...", fetching:"Stream dhoondh raha hai...", recording:"🔴 Recording / Clipping", stopped:"Ruk gaya", error:"Error" };
+const STATE_TXT = { idle:"Idle", starting:"Starting...", fetching:"Finding stream...", recording:"🔴 Recording / Clipping", stopped:"Stopped", error:"Error" };
 let rendered = new Set();
 let currentSession = null;
 const downloaded = new Set(JSON.parse(localStorage.getItem("downloaded") || "[]"));
@@ -128,7 +128,7 @@ $("startBtn").onclick = async () => {
     body: JSON.stringify({ url:$("url").value, seconds:$("seconds").value, mode:$("mode").value, quality:$("quality").value, browser:$("browser").value })
   });
   const data = await res.json();
-  if (!res.ok) $("err").textContent = data.error || "Kuch gadbad hui";
+  if (!res.ok) $("err").textContent = data.error || "Something went wrong";
   poll();
 };
 $("stopBtn").onclick = () => fetch("/api/stop", { method:"POST" }).then(poll);
