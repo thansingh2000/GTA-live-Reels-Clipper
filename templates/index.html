@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GTA Live → Reels Clipper</title>
+<style>
+  :root { --bg:#0d0f14; --card:#161a22; --line:#262c38; --txt:#e8ebf1; --mut:#8a93a6; --acc:#ff2d55; --ok:#2ecc71; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:Segoe UI, system-ui, sans-serif; background:var(--bg); color:var(--txt); }
+  header { padding:20px 28px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:12px; }
+  header h1 { font-size:20px; margin:0; }
+  header span { color:var(--mut); font-size:13px; }
+  main { max-width:1200px; margin:0 auto; padding:24px; display:grid; gap:20px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px; }
+  label { font-size:12px; color:var(--mut); display:block; margin-bottom:6px; }
+  input, select { width:100%; padding:10px 12px; border-radius:8px; border:1px solid var(--line); background:#0f1218; color:var(--txt); font-size:14px; }
+  .row { display:grid; grid-template-columns: 1fr 1fr 1fr auto; gap:14px; margin-top:14px; align-items:end; }
+  button { padding:11px 20px; border:0; border-radius:8px; font-weight:600; cursor:pointer; font-size:14px; }
+  .start { background:var(--acc); color:#fff; }
+  .stop { background:#2b3140; color:#fff; }
+  .ghost { background:transparent; border:1px solid var(--line); color:var(--txt); padding:7px 12px; font-size:12px; }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  .check { display:flex; align-items:center; gap:8px; margin-top:14px; font-size:13px; color:var(--mut); }
+  .check input { width:auto; }
+  .status { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .dot { width:10px; height:10px; border-radius:50%; background:var(--mut); }
+  .dot.recording { background:var(--acc); animation:pulse 1s infinite; }
+  .dot.fetching, .dot.starting { background:#f1c40f; }
+  .dot.error { background:#e74c3c; }
+  .dot.stopped { background:var(--ok); }
+  @keyframes pulse { 50% { opacity:.3; } }
+  .log { margin-top:12px; background:#0a0c10; border-radius:8px; padding:10px; height:140px; overflow:auto; font:12px Consolas, monospace; color:#9fb0c8; white-space:pre-wrap; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(180px, 1fr)); gap:14px; margin-top:12px; }
+  .clip { background:#0f1218; border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  .clip video { width:100%; aspect-ratio:9/16; background:#000; display:block; }
+  .clip .meta { padding:8px 10px; display:flex; justify-content:space-between; align-items:center; font-size:12px; }
+  .clip a { color:#fff; background:var(--acc); padding:5px 10px; border-radius:6px; text-decoration:none; font-weight:600; }
+  .empty { color:var(--mut); font-size:13px; padding:20px 0; }
+  .err { color:#ff6b6b; font-size:13px; margin-top:10px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🎮 GTA Live → 9:16 Reels Clipper</h1>
+  <span>YouTube live link daalo, clips apne aap cut hokar download hongi</span>
+</header>
+<main>
+  <section class="card">
+    <label>YouTube Live / Video link</label>
+    <input id="url" placeholder="https://www.youtube.com/watch?v=...  ya  https://youtube.com/live/...">
+    <div class="row">
+      <div>
+        <label>Har clip ki length</label>
+        <select id="seconds">
+          <option value="15">15 sec</option>
+          <option value="30" selected>30 sec</option>
+          <option value="45">45 sec</option>
+          <option value="60">60 sec</option>
+          <option value="90">90 sec</option>
+        </select>
+      </div>
+      <div>
+        <label>9:16 Style</label>
+        <select id="mode">
+          <option value="blur" selected>Full gameplay + blur background</option>
+          <option value="crop">Center crop (full screen)</option>
+          <option value="zoom">Zoom fill</option>
+        </select>
+      </div>
+      <div>
+        <label>Source quality</label>
+        <select id="quality">
+          <option value="1080" selected>1080p</option>
+          <option value="720">720p (fast)</option>
+          <option value="480">480p (slow PC)</option>
+        </select>
+      </div>
+      <div style="display:flex; gap:10px;">
+        <button class="start" id="startBtn">▶ Start</button>
+        <button class="stop" id="stopBtn" disabled>■ Stop</button>
+      </div>
+    </div>
+    <div style="margin-top:14px; max-width:420px;">
+      <label>YouTube cookies (agar "not a bot" error aaye) — browser me YouTube login hona chahiye</label>
+      <select id="browser">
+        <option value="">Auto (khud dhoondho / cookies.txt)</option>
+        <option value="firefox">Firefox (sabse reliable)</option>
+        <option value="chrome">Chrome</option>
+        <option value="edge">Edge</option>
+        <option value="brave">Brave</option>
+        <option value="opera">Opera</option>
+      </select>
+    </div>
+    <label class="check"><input type="checkbox" id="autodl" checked> Nayi clip bante hi browser me auto-download karo</label>
+    <div class="err" id="err"></div>
+  </section>
+
+  <section class="card">
+    <div class="status">
+      <div class="dot" id="dot"></div>
+      <strong id="stateTxt">Idle</strong>
+      <span style="color:var(--mut); font-size:13px;" id="titleTxt"></span>
+      <span style="flex:1"></span>
+      <button class="ghost" id="folderBtn">📁 Folder kholo</button>
+    </div>
+    <div class="log" id="log"></div>
+  </section>
+
+  <section class="card">
+    <strong>Clips (<span id="count">0</span>)</strong>
+    <div class="grid" id="clips"></div>
+    <div class="empty" id="empty">Abhi koi clip nahi bani. Start dabao — pehli clip ~clip length ke baad aayegi.</div>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const STATE_TXT = { idle:"Idle", starting:"Start ho raha hai...", fetching:"Stream dhoondh raha hai...", recording:"🔴 Recording / Clipping", stopped:"Ruk gaya", error:"Error" };
+let rendered = new Set();
+let currentSession = null;
+const downloaded = new Set(JSON.parse(localStorage.getItem("downloaded") || "[]"));
+
+$("startBtn").onclick = async () => {
+  $("err").textContent = "";
+  const res = await fetch("/api/start", {
+    method:"POST", headers:{ "Content-Type":"application/json" },
+    body: JSON.stringify({ url:$("url").value, seconds:$("seconds").value, mode:$("mode").value, quality:$("quality").value, browser:$("browser").value })
+  });
+  const data = await res.json();
+  if (!res.ok) $("err").textContent = data.error || "Kuch gadbad hui";
+  poll();
+};
+$("stopBtn").onclick = () => fetch("/api/stop", { method:"POST" }).then(poll);
+$("folderBtn").onclick = () => fetch("/api/open-folder", { method:"POST" });
+
+function autoDownload(href, key) {
+  if (!$("autodl").checked || downloaded.has(key)) return;
+  downloaded.add(key);
+  localStorage.setItem("downloaded", JSON.stringify([...downloaded].slice(-500)));
+  const a = document.createElement("a");
+  a.href = href + "?dl=1"; a.download = "";
+  document.body.appendChild(a); a.click(); a.remove();
+}
+
+function renderClips(session, clips) {
+  if (session !== currentSession) { currentSession = session; rendered = new Set(); $("clips").innerHTML = ""; }
+  $("count").textContent = clips.length;
+  $("empty").style.display = clips.length ? "none" : "block";
+  for (const c of clips) {
+    const key = session + "/" + c.name;
+    if (rendered.has(key)) continue;
+    rendered.add(key);
+    const href = `/clips/${encodeURIComponent(session)}/${encodeURIComponent(c.name)}`;
+    const el = document.createElement("div");
+    el.className = "clip";
+    el.innerHTML = `<video src="${href}" controls preload="metadata" muted></video>
+      <div class="meta"><span>${c.name.replace(".mp4","")} · ${c.size_mb} MB</span><a href="${href}?dl=1">⬇</a></div>`;
+    $("clips").prepend(el);
+    autoDownload(href, key);
+  }
+}
+
+async function poll() {
+  try {
+    const s = await (await fetch("/api/status")).json();
+    $("dot").className = "dot " + s.state;
+    $("stateTxt").textContent = STATE_TXT[s.state] || s.state;
+    $("titleTxt").textContent = s.title || "";
+    const busy = ["starting","fetching","recording"].includes(s.state);
+    $("startBtn").disabled = busy;
+    $("stopBtn").disabled = !busy;
+    if (s.error) $("err").textContent = s.error;
+    const log = $("log");
+    const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 10;
+    log.textContent = s.log.join("\n");
+    if (atBottom) log.scrollTop = log.scrollHeight;
+    if (s.session) renderClips(s.session, s.clips);
+  } catch (e) {}
+}
+setInterval(poll, 2000);
+poll();
+</script>
+</body>
+</html>
