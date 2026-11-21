@@ -2,6 +2,8 @@
 
 Paste a YouTube live (or regular video) link — the tool records the stream, cuts it into **1080x1920 (9:16) reel clips** every N seconds, and downloads them automatically in your browser.
 
+> **New here?** Follow the step-by-step [Setup & Use Guide](SETUP_GUIDE.md).
+
 ## Requirements
 
 - Windows 10/11
