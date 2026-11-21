@@ -11,6 +11,8 @@ from datetime import datetime
 from flask import Flask, jsonify, render_template, request, send_from_directory, abort
 import yt_dlp
 
+from uploader import YouTubeUploader
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CLIPS_DIR = os.path.join(BASE_DIR, "clips")
 os.makedirs(CLIPS_DIR, exist_ok=True)
@@ -261,6 +263,13 @@ def list_clips(session_dir):
 
 app = Flask(__name__)
 recorder = Recorder()
+uploader = YouTubeUploader(
+    BASE_DIR,
+    get_session_dir=lambda: recorder.session_dir,
+    get_stream_title=lambda: recorder.title,
+    list_clips=list_clips,
+    log=recorder._log,
+)
 
 
 @app.route("/")
@@ -297,7 +306,80 @@ def api_stop():
 def api_status():
     st = recorder.status()
     st["clips"] = list_clips(recorder.session_dir)
+    for clip in st["clips"]:
+        clip["upload"] = uploader.clip_state(clip["name"])
+    st["youtube"] = uploader.status()
     return jsonify(st)
+
+
+@app.post("/api/youtube/connect")
+def api_youtube_connect():
+    try:
+        uploader.connect()
+    except RuntimeError as e:
+        return jsonify(error=str(e)), 400
+    return jsonify(ok=True)
+
+
+@app.post("/api/youtube/disconnect")
+def api_youtube_disconnect():
+    uploader.disconnect()
+    return jsonify(ok=True)
+
+
+@app.post("/api/youtube/settings")
+def api_youtube_settings():
+    uploader.update_settings(request.get_json(force=True))
+    return jsonify(ok=True)
+
+
+def _clip_name_or_error(name):
+    name = os.path.basename(name or "")
+    if not recorder.session_dir or not os.path.exists(os.path.join(recorder.session_dir, name)):
+        return None, (jsonify(error="Clip not found."), 404)
+    return name, None
+
+
+@app.get("/api/youtube/meta")
+def api_youtube_meta():
+    name, err = _clip_name_or_error(request.args.get("name"))
+    if err:
+        return err
+    meta = uploader.default_metadata(name)
+    st = uploader.clip_state(name) or {}
+    meta["title"] = st.get("title", meta["title"])
+    meta["description"] = st.get("description", meta["description"])
+    meta["privacy"] = uploader.settings["privacy"]
+    return jsonify(meta)
+
+
+@app.post("/api/youtube/approve")
+def api_youtube_approve():
+    data = request.get_json(force=True)
+    name, err = _clip_name_or_error(data.get("name"))
+    if err:
+        return err
+    if not uploader.enabled:
+        return jsonify(error="YouTube upload is disabled."), 400
+    if not uploader.connected:
+        return jsonify(error="Connect your YouTube account first."), 400
+    uploader.enqueue(name, title=data.get("title"), description=data.get("description"))
+    return jsonify(ok=True)
+
+
+@app.post("/api/youtube/reject")
+def api_youtube_reject():
+    name, err = _clip_name_or_error(request.get_json(force=True).get("name"))
+    if err:
+        return err
+    uploader.reject(name)
+    return jsonify(ok=True)
+
+
+@app.post("/api/youtube/resume")
+def api_youtube_resume():
+    uploader.resume()
+    return jsonify(ok=True)
 
 
 @app.post("/api/open-folder")

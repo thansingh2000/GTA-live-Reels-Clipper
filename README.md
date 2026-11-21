@@ -54,6 +54,37 @@ d:\tool\clips\<date_time>_<stream_title>\clip_0000.mp4, clip_0001.mp4, ...
 
 The **📁 Open folder** button in the UI opens it directly.
 
+## YouTube auto-upload
+
+The tool can upload every finished clip to your YouTube channel as a Short (vertical, under 3 minutes) using the official YouTube Data API v3.
+
+### One-time setup
+
+1. Open [Google Cloud Console](https://console.cloud.google.com/) and create a project.
+2. **APIs & Services → Library** → enable **YouTube Data API v3**.
+3. **APIs & Services → OAuth consent screen** → User type **External** → fill in the app name and your email → under **Test users** add the Google account that owns your YouTube channel.
+4. **APIs & Services → Credentials → Create credentials → OAuth client ID** → Application type **Desktop app**.
+5. Download the JSON and save it as `d:\tool\client_secret.json`.
+6. Restart the tool, click **Connect YouTube** in the UI, and log in with your channel's account. (Google shows an "app isn't verified" warning for your own test app — click **Continue**.)
+
+The login is saved in `token.json`, so you only do this once.
+
+### Using it
+
+- Turn on the **YouTube upload** switch. When it is off (the default), the tool works exactly like before: clips are only saved and downloaded, and no upload options or buttons are shown.
+- Set the **Daily upload limit** (1–50, default 5) right in the UI.
+- Set the **title template** (`{n}` = clip number, `{stream}` = stream title, `{date}` = today), description, tags and privacy.
+- Tick **Automatically upload every new clip** — every clip finished *after* you tick it is picked up.
+- **Review each clip before it uploads** (on by default): new clips wait as "👀 Waiting for review". Click **Review now** (or **Review** on a clip) to open a preview popup where you watch the clip, edit its title/description, and choose **✅ Approve & Upload**, **🚫 Skip this clip**, or **Decide later**. After each decision the next waiting clip opens automatically. Turn this option off to upload new clips without asking.
+- Any clip (including older or skipped ones) can be uploaded with its **⬆ Upload** button — it opens the same preview popup first. Failed uploads show a **Retry** button.
+- Each clip card shows its status: waiting for review, skipped, queued, uploading %, uploaded (with link), or the error.
+
+### Important YouTube limits
+
+- **Daily quota:** a new Google Cloud project gets 10,000 API units/day and one upload costs ~1,600, so only **about 6 uploads per day**. The tool therefore caps uploads at **5 per day** by default (change it with **Daily upload limit** in the UI), counted on the same day boundary as the quota (midnight Pacific time ≈ 1:30 PM IST). Extra clips stay queued and upload automatically after the reset. If Google still reports the quota as exhausted, uploads pause — press **Retry now** later. For more uploads, request a quota increase from Google.
+- **Private lock for unverified apps:** videos uploaded through an API project that hasn't passed Google's audit may be locked to **Private**, whatever privacy you choose. To publish them, change visibility in YouTube Studio or get the project audited by Google.
+- Uploading clips of someone else's stream can trigger **copyright claims** — only upload streams you own or have permission to use.
+
 ## Troubleshooting
 
 | Problem | Solution |
@@ -75,6 +106,7 @@ The **📁 Open folder** button in the UI opens it directly.
 ```
 d:\tool
 ├── app.py               # Flask backend: yt-dlp + ffmpeg recording / clipping
+├── uploader.py          # YouTube Data API upload queue
 ├── templates\index.html # Web UI
 ├── requirements.txt
 ├── start.bat            # One-click setup + run

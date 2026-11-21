@@ -6,8 +6,12 @@ __pycache__/
 # Generated reels
 clips/
 
-# YouTube login cookies — never commit
+# Secrets / local settings — never commit
 cookies.txt
+client_secret*.json
+token.json
+yt_settings.json
+upload_counts.json
 
 # OS / editor
 Thumbs.db

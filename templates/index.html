@@ -38,6 +38,32 @@
   .clip a { color:#fff; background:var(--acc); padding:5px 10px; border-radius:6px; text-decoration:none; font-weight:600; }
   .empty { color:var(--mut); font-size:13px; padding:20px 0; }
   .err { color:#ff6b6b; font-size:13px; margin-top:10px; }
+  textarea { width:100%; padding:10px 12px; border-radius:8px; border:1px solid var(--line); background:#0f1218; color:var(--txt); font:14px Segoe UI, sans-serif; resize:vertical; }
+  .yt-grid { display:grid; grid-template-columns: 2fr 1fr; gap:14px; margin-top:14px; }
+  .note { margin-top:12px; padding:10px 12px; border-radius:8px; background:#1d2433; color:#b8c4da; font-size:13px; }
+  .note.warn { background:#3a2a12; color:#f5c97a; }
+  code { background:#0a0c10; padding:1px 5px; border-radius:4px; font-size:12px; }
+  .up { padding:0 10px 8px; font-size:11px; color:var(--mut); display:flex; justify-content:space-between; align-items:center; gap:6px; }
+  .up a { background:none; color:#7fb2ff; padding:0; font-weight:600; }
+  .up .done { color:var(--ok); }
+  .up .error { color:#ff6b6b; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .up button { padding:3px 8px; font-size:11px; background:#2b3140; color:#fff; }
+  body.yt-off .up, body.yt-off .review-banner { display:none !important; }
+  .review-banner { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  .review-banner button { padding:7px 14px; font-size:13px; }
+  .up .review { color:#f5c97a; }
+  .modal-bg { position:fixed; inset:0; background:rgba(0,0,0,.75); display:flex; align-items:center; justify-content:center; z-index:10; padding:20px; }
+  .modal { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px; display:flex; gap:18px; max-width:860px; width:100%; max-height:92vh; }
+  .modal video { height:min(78vh, 640px); aspect-ratio:9/16; background:#000; border-radius:10px; }
+  .modal-side { flex:1; display:flex; flex-direction:column; gap:12px; min-width:260px; }
+  .limit-row { display:flex; align-items:center; gap:10px; margin-top:14px; flex-wrap:wrap; }
+  .limit-row input[type=number] { width:80px; }
+  .switch { position:relative; display:inline-block; width:42px; height:24px; margin:0; }
+  .switch input { opacity:0; width:0; height:0; }
+  .slider { position:absolute; inset:0; background:#2b3140; border-radius:24px; cursor:pointer; transition:.2s; }
+  .slider::before { content:""; position:absolute; width:18px; height:18px; left:3px; top:3px; background:#fff; border-radius:50%; transition:.2s; }
+  .switch input:checked + .slider { background:var(--acc); }
+  .switch input:checked + .slider::before { transform:translateX(18px); }
 </style>
 </head>
 <body>
@@ -98,6 +124,63 @@
 
   <section class="card">
     <div class="status">
+      <strong>▶ YouTube upload</strong>
+      <label class="switch" title="Turn the whole YouTube upload feature on or off">
+        <input type="checkbox" id="ytEnabled" class="yt-field" data-key="youtube_enabled">
+        <span class="slider"></span>
+      </label>
+      <span id="ytEnabledTxt" style="color:var(--mut); font-size:13px;">Off — clips are only saved / downloaded</span>
+    </div>
+    <div id="ytBody" style="display:none;">
+    <div class="status" style="margin-top:14px;">
+      <span id="ytAccount" style="color:var(--mut); font-size:13px;">Not connected</span>
+      <span style="flex:1"></span>
+      <button class="ghost" id="ytConnectBtn">Connect YouTube</button>
+      <button class="ghost" id="ytDisconnectBtn" style="display:none;">Disconnect</button>
+    </div>
+    <div class="note" id="ytSetupNote" style="display:none;">
+      <code>client_secret.json</code> not found. Create a Google Cloud OAuth client (Desktop app) with YouTube Data API v3 enabled
+      and put the file in the project folder — see README → <b>YouTube upload setup</b>.
+    </div>
+    <div class="yt-grid">
+      <div>
+        <label>Title template — <code>{n}</code> clip number, <code>{stream}</code> stream title, <code>{date}</code></label>
+        <input id="ytTitle" class="yt-field" data-key="title_template">
+      </div>
+      <div>
+        <label>Privacy</label>
+        <select id="ytPrivacy" class="yt-field" data-key="privacy">
+          <option value="private">Private</option>
+          <option value="unlisted">Unlisted</option>
+          <option value="public">Public</option>
+        </select>
+      </div>
+      <div>
+        <label>Description</label>
+        <textarea id="ytDesc" class="yt-field" data-key="description" rows="3"></textarea>
+      </div>
+      <div>
+        <label>Tags (comma separated)</label>
+        <input id="ytTags" class="yt-field" data-key="tags">
+      </div>
+    </div>
+    <div class="limit-row">
+      <label class="check" style="margin:0;"><input type="checkbox" id="ytAuto" class="yt-field" data-key="auto_upload"> Automatically upload every new clip to YouTube as a Short</label>
+      <span style="flex:1"></span>
+      <label for="ytLimit" style="margin:0;">Daily upload limit</label>
+      <input id="ytLimit" class="yt-field" data-key="daily_limit" type="number" min="1" max="50" step="1">
+    </div>
+    <label class="check"><input type="checkbox" id="ytReview" class="yt-field" data-key="require_review"> Review each clip before it uploads (watch preview, edit title, then confirm)</label>
+    <div class="note" id="ytLimitWarn" style="display:none;">
+      A default Google Cloud project only has quota for about 6 uploads per day. Above that, uploads pause until Google's quota resets unless you got a quota increase.
+    </div>
+    <div class="note warn" id="ytPaused" style="display:none;"><span id="ytPausedTxt"></span> <button class="ghost" id="ytResumeBtn">Retry now</button></div>
+    </div>
+    <div class="err" id="ytErr"></div>
+  </section>
+
+  <section class="card">
+    <div class="status">
       <div class="dot" id="dot"></div>
       <strong id="stateTxt">Idle</strong>
       <span style="color:var(--mut); font-size:13px;" id="titleTxt"></span>
@@ -109,10 +192,39 @@
 
   <section class="card">
     <strong>Clips (<span id="count">0</span>)</strong>
+    <div class="note review-banner" id="reviewBanner" style="display:none;">
+      <span>👀 <b id="reviewCount">0</b> clip(s) waiting for your review before upload</span>
+      <button class="start" id="reviewNextBtn">Review now</button>
+    </div>
     <div class="grid" id="clips"></div>
     <div class="empty" id="empty">No clips yet. Press Start — the first clip appears after about one clip length.</div>
   </section>
 </main>
+
+<div class="modal-bg" id="reviewModal" style="display:none;">
+  <div class="modal">
+    <video id="rvVideo" controls autoplay playsinline></video>
+    <div class="modal-side">
+      <strong>Review before upload</strong>
+      <span style="color:var(--mut); font-size:12px;" id="rvName"></span>
+      <div>
+        <label>Title <span id="rvTitleCount" style="float:right;"></span></label>
+        <input id="rvTitle" maxlength="100">
+      </div>
+      <div style="flex:1; display:flex; flex-direction:column;">
+        <label>Description</label>
+        <textarea id="rvDesc" style="flex:1; min-height:120px;"></textarea>
+      </div>
+      <span style="color:var(--mut); font-size:12px;">Privacy: <b id="rvPrivacy"></b> · tags and privacy come from the YouTube settings above</span>
+      <div class="err" id="rvErr"></div>
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <button class="start" id="rvApprove">✅ Approve &amp; Upload</button>
+        <button class="stop" id="rvReject">🚫 Skip this clip</button>
+        <button class="ghost" id="rvCancel">Decide later</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <script>
 const $ = id => document.getElementById(id);
@@ -155,10 +267,142 @@ function renderClips(session, clips) {
     const el = document.createElement("div");
     el.className = "clip";
     el.innerHTML = `<video src="${href}" controls preload="metadata" muted></video>
-      <div class="meta"><span>${c.name.replace(".mp4","")} · ${c.size_mb} MB</span><a href="${href}?dl=1">⬇</a></div>`;
+      <div class="meta"><span>${c.name.replace(".mp4","")} · ${c.size_mb} MB</span><a href="${href}?dl=1">⬇</a></div>
+      <div class="up" data-clip="${c.name}"></div>`;
     $("clips").prepend(el);
     autoDownload(href, key);
   }
+  for (const c of clips) {
+    const box = document.querySelector(`.up[data-clip="${c.name}"]`);
+    if (!box) continue;
+    const u = c.upload;
+    let html;
+    if (!u) html = `<span>Not uploaded</span><button data-upload="${c.name}">⬆ Upload</button>`;
+    else if (u.status === "review") html = `<span class="review">👀 Waiting for review</span><button data-upload="${c.name}">Review</button>`;
+    else if (u.status === "rejected") html = `<span>🚫 Skipped</span><button data-upload="${c.name}">⬆ Upload</button>`;
+    else if (u.status === "queued") html = `<span>⏳ Queued for YouTube</span>`;
+    else if (u.status === "uploading") html = `<span>⬆ Uploading ${u.progress || 0}%</span>`;
+    else if (u.status === "done") html = `<span class="done">✅ Uploaded</span><a href="${u.url}" target="_blank">Open ↗</a>`;
+    else html = `<span class="error" title="${(u.error || "").replace(/"/g, "&quot;")}">❌ ${u.error || "Failed"}</span><button data-upload="${c.name}">Retry</button>`;
+    if (box.dataset.html !== html) { box.innerHTML = html; box.dataset.html = html; }
+  }
+  pendingReview = clips.filter(c => c.upload && c.upload.status === "review").map(c => c.name);
+  $("reviewCount").textContent = pendingReview.length;
+  $("reviewBanner").style.display = pendingReview.length ? "flex" : "none";
+}
+
+let pendingReview = [];
+let reviewing = null;
+const postJSON = (url, body) => fetch(url, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) });
+
+async function openReview(name) {
+  const res = await fetch(`/api/youtube/meta?name=${encodeURIComponent(name)}`);
+  if (!res.ok) { $("ytErr").textContent = (await res.json()).error; return; }
+  const meta = await res.json();
+  reviewing = name;
+  $("rvName").textContent = name;
+  $("rvVideo").src = `/clips/${encodeURIComponent(currentSession)}/${encodeURIComponent(name)}`;
+  $("rvTitle").value = meta.title;
+  $("rvDesc").value = meta.description;
+  $("rvPrivacy").textContent = meta.privacy;
+  $("rvErr").textContent = "";
+  updateTitleCount();
+  $("reviewModal").style.display = "flex";
+}
+
+function closeReview() {
+  reviewing = null;
+  $("rvVideo").pause();
+  $("rvVideo").removeAttribute("src");
+  $("rvVideo").load();
+  $("reviewModal").style.display = "none";
+}
+
+async function finishReview(url, body) {
+  $("rvApprove").disabled = $("rvReject").disabled = true;
+  const res = await postJSON(url, body);
+  $("rvApprove").disabled = $("rvReject").disabled = false;
+  if (!res.ok) { $("rvErr").textContent = (await res.json()).error; return; }
+  const done = reviewing;
+  pendingReview = pendingReview.filter(n => n !== done);
+  const next = pendingReview.find(n => n !== done);
+  if (next) openReview(next); else closeReview();
+  poll();
+}
+
+function updateTitleCount() { $("rvTitleCount").textContent = `${$("rvTitle").value.length}/100`; }
+$("rvTitle").addEventListener("input", updateTitleCount);
+$("rvApprove").onclick = () => finishReview("/api/youtube/approve", { name:reviewing, title:$("rvTitle").value, description:$("rvDesc").value });
+$("rvReject").onclick = () => finishReview("/api/youtube/reject", { name:reviewing });
+$("rvCancel").onclick = closeReview;
+$("reviewModal").addEventListener("click", e => { if (e.target.id === "reviewModal") closeReview(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape" && reviewing) closeReview(); });
+$("reviewNextBtn").onclick = () => pendingReview.length && openReview(pendingReview[pendingReview.length - 1]);
+
+document.addEventListener("click", (e) => {
+  const name = e.target.dataset && e.target.dataset.upload;
+  if (name) openReview(name);
+});
+
+let ytLoaded = false;
+let saveTimer = null;
+function applyYtEnabled() {
+  const on = $("ytEnabled").checked;
+  $("ytBody").style.display = on ? "" : "none";
+  $("ytEnabledTxt").textContent = on ? "On" : "Off — clips are only saved / downloaded";
+  document.body.classList.toggle("yt-off", !on);
+  $("ytLimitWarn").style.display = on && Number($("ytLimit").value) > 6 ? "block" : "none";
+}
+$("ytEnabled").addEventListener("change", applyYtEnabled);
+$("ytLimit").addEventListener("change", () => {
+  const v = Math.round(Number($("ytLimit").value) || 5);
+  $("ytLimit").value = Math.max(1, Math.min(50, v));
+  applyYtEnabled();
+});
+
+function saveYtSettings() {
+  const body = {};
+  document.querySelectorAll(".yt-field").forEach(f => body[f.dataset.key] = f.type === "checkbox" ? f.checked : f.value);
+  fetch("/api/youtube/settings", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) });
+}
+document.querySelectorAll(".yt-field").forEach(f => {
+  f.addEventListener(f.type === "checkbox" || f.tagName === "SELECT" ? "change" : "input", () => {
+    clearTimeout(saveTimer); saveTimer = setTimeout(saveYtSettings, 500);
+  });
+});
+$("ytConnectBtn").onclick = async () => {
+  $("ytErr").textContent = "";
+  const res = await fetch("/api/youtube/connect", { method:"POST" });
+  if (!res.ok) $("ytErr").textContent = (await res.json()).error;
+  poll();
+};
+$("ytDisconnectBtn").onclick = () => fetch("/api/youtube/disconnect", { method:"POST" }).then(poll);
+$("ytResumeBtn").onclick = () => fetch("/api/youtube/resume", { method:"POST" }).then(poll);
+
+function renderYouTube(yt) {
+  if (!ytLoaded) {
+    ytLoaded = true;
+    $("ytTitle").value = yt.settings.title_template;
+    $("ytDesc").value = yt.settings.description;
+    $("ytTags").value = yt.settings.tags;
+    $("ytPrivacy").value = yt.settings.privacy;
+    $("ytAuto").checked = yt.settings.auto_upload;
+    $("ytEnabled").checked = yt.settings.youtube_enabled;
+    $("ytReview").checked = yt.settings.require_review;
+    $("ytLimit").value = yt.settings.daily_limit;
+    applyYtEnabled();
+  }
+  $("ytSetupNote").style.display = yt.has_client_secret ? "none" : "block";
+  $("ytAccount").textContent = yt.connecting ? "Waiting for Google login in the browser..."
+    : yt.connected ? `Connected: ${yt.channel} · Today ${yt.uploads_today}/${yt.daily_limit} uploads${yt.queue ? ` · ${yt.queue} in queue` : ""}` : "Not connected";
+  $("ytResumeBtn").style.display = yt.uploads_today >= yt.daily_limit ? "none" : "";
+  $("ytConnectBtn").style.display = yt.connected ? "none" : "";
+  $("ytConnectBtn").disabled = !yt.has_client_secret;
+  $("ytConnectBtn").textContent = yt.connecting ? "Try again" : "Connect YouTube";
+  $("ytDisconnectBtn").style.display = yt.connected ? "" : "none";
+  $("ytPaused").style.display = yt.paused ? "block" : "none";
+  $("ytPausedTxt").textContent = yt.paused;
+  $("ytErr").textContent = yt.settings.youtube_enabled ? yt.error : "";
 }
 
 async function poll() {
@@ -175,6 +419,7 @@ async function poll() {
     const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 10;
     log.textContent = s.log.join("\n");
     if (atBottom) log.scrollTop = log.scrollHeight;
+    if (s.youtube) renderYouTube(s.youtube);
     if (s.session) renderClips(s.session, s.clips);
   } catch (e) {}
 }
