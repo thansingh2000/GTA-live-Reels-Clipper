@@ -776,7 +776,7 @@ async function poll() {
       $("count").textContent = s.max_clips ? `${s.clips.length}/${s.max_clips}` : s.clips.length;
       updateUploadModal(Object.fromEntries(s.clips.map(c => [c.name, c])), s.youtube);
     }
-    $("outputTxt").textContent = s.output || `Encoder: ${s.encoder}`;
+    $("outputTxt").textContent = (s.progress ? `⏱ ${s.progress} · ` : "") + (s.output || `Encoder: ${s.encoder}`);
   } catch (e) {}
 }
 setInterval(poll, 2000);

@@ -124,6 +124,11 @@ def encoder_args(width):
     return ["-c:v", "libx264", "-preset", preset, "-crf", "21", "-pix_fmt", "yuv420p"]
 
 
+def fmt_duration(sec):
+    sec = int(sec)
+    return f"{sec // 3600}:{sec % 3600 // 60:02d}:{sec % 60:02d}"
+
+
 def safe_name(text, limit=40):
     text = re.sub(r"[^\w\- ]+", "", text or "stream", flags=re.UNICODE).strip()
     return re.sub(r"\s+", "_", text)[:limit] or "stream"
@@ -143,6 +148,8 @@ class Recorder:
         self.max_clips = 0
         self.part_label = True
         self.channel_text = ""
+        self.duration = 0
+        self.progress = ""
         self.output = ""
         self.log = deque(maxlen=60)
 
@@ -161,6 +168,8 @@ class Recorder:
             self.max_clips = max_clips
             self.part_label = part_label
             self.channel_text = channel_text
+            self.duration = 0
+            self.progress = ""
             self.log.clear()
             self.state = "starting"
             self.thread = threading.Thread(
@@ -281,14 +290,30 @@ class Recorder:
         ]
         return cmd
 
+    def _track_progress(self, line, offset):
+        match = re.search(r"time=(\d+):(\d+):(\d+(?:\.\d+)?)", line)
+        if not match or not self.duration:
+            return
+        h, m, s = match.groups()
+        pos = min(self.duration, offset + int(h) * 3600 + int(m) * 60 + float(s))
+        self.progress = (f"{fmt_duration(pos)} / {fmt_duration(self.duration)} "
+                         f"({pos * 100 / self.duration:.0f}%)")
+
     def _run(self, url, seconds, mode, quality):
         try:
             retries = 0
+            was_live = False
             while not self.stop_event.is_set():
                 self.state = "fetching"
                 self._log("Fetching stream info (yt-dlp)...")
                 info = self._extract(url, quality)
                 is_live = bool(info.get("is_live"))
+                if was_live and not is_live:
+                    # Once a live ends YouTube serves the full replay; re-reading it would clip everything again.
+                    self._log("Live stream has ended — clipping stopped.")
+                    break
+                was_live = is_live
+                self.duration = 0 if is_live else (info.get("duration") or 0)
 
                 if self.session_dir is None or not self.title:
                     self.title = info.get("title") or "stream"
@@ -329,8 +354,9 @@ class Recorder:
                     if not line:
                         continue
                     if line.startswith("frame=") or "time=" in line:
+                        self._track_progress(line, done * seconds)
                         if time.time() - last_stat > 5:
-                            self._log(line)
+                            self._log(line + (f" · {self.progress}" if self.progress else ""))
                             last_stat = time.time()
                     else:
                         self._log(line)
@@ -343,7 +369,12 @@ class Recorder:
                     self._log(f"Done — {self.max_clips} clips created, recording stopped automatically.")
                     break
                 if not is_live:
-                    self._log("Video finished — all clips created.")
+                    if code == 0:
+                        total = fmt_duration(self.duration)
+                        self.progress = f"{total} / {total} (100%)" if self.duration else ""
+                        self._log("Video finished — all clips created, clipping stopped.")
+                    else:
+                        self._log(f"ffmpeg stopped with an error (code {code}) before the video ended.")
                     break
                 retries += 1
                 if retries > 20:
@@ -368,6 +399,7 @@ class Recorder:
             "folder": self.session_dir,
             "max_clips": self.max_clips,
             "output": self.output,
+            "progress": self.progress,
             "encoder": ENCODER_NAMES[ENCODER],
             "log": list(self.log),
         }
