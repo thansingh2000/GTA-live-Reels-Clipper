@@ -60,6 +60,8 @@
   .modal video { height:min(78vh, 640px); aspect-ratio:9/16; background:#000; border-radius:10px; }
   .modal-side { flex:1; display:flex; flex-direction:column; gap:12px; min-width:260px; overflow:auto; }
   #rvDoneVideoTitle { white-space:pre-line; }
+  .chan-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:10px; }
+  .chan-row input { flex:1; min-width:200px; max-width:320px; }
   .hint { color:var(--mut); font-size:12px; }
   .thumb-row { display:flex; gap:12px; align-items:flex-start; }
   .thumb-box { width:72px; aspect-ratio:9/16; border:1px dashed var(--line); border-radius:8px; display:flex; align-items:center; justify-content:center; text-align:center; font-size:10px; color:var(--mut); overflow:hidden; position:relative; flex-shrink:0; }
@@ -146,7 +148,7 @@
       </div>
       <div>
         <label>Stop after (clips)</label>
-        <input id="maxClips" type="number" min="0" max="1000" step="1" value="0" title="0 = no limit, keep clipping until you press Stop">
+        <input id="maxClips" type="number" min="0" max="1000" step="1" placeholder="Unlimited" title="Empty or 0 = unlimited, keep clipping until you press Stop">
       </div>
       <div style="display:flex; gap:10px;">
         <button class="start" id="startBtn">▶ Start</button>
@@ -163,6 +165,11 @@
         <option value="brave">Brave</option>
         <option value="opera">Opera</option>
       </select>
+    </div>
+    <label class="check"><input type="checkbox" id="partLabel" checked> Write <b>"Part #1"</b> + <b>"Please Subscribe for next Part"</b> on top of each clip (restarts at Part #1 every session)</label>
+    <div class="chan-row">
+      <label class="check" style="margin:0;"><input type="checkbox" id="chanLabel" checked> Channel name at the bottom center:</label>
+      <input id="chanText" maxlength="60" placeholder="Connected YouTube channel name">
     </div>
     <label class="check"><input type="checkbox" id="autodl" checked> Auto-download each new clip in the browser</label>
     <div class="note" id="qualityNote" style="display:none;">
@@ -193,6 +200,7 @@
       and put the file in the project folder — see README → <b>YouTube upload setup</b>.
     </div>
     <label class="check"><input type="checkbox" id="ytSeo" class="yt-field" data-key="seo_mode"> ✨ SEO mode — auto-generate a keyword-optimized title, description, hashtags and tags for every clip</label>
+    <label class="check"><input type="checkbox" id="ytPart" class="yt-field" data-key="part_in_title"> Add <b>"– Part N"</b> to every YouTube title (same number as written on the clip)</label>
     <div class="yt-grid">
       <div id="seoKeywordsBox">
         <label>Focus keywords (comma separated, most important first) — empty = detect from the stream title</label>
@@ -361,19 +369,30 @@ $("startBtn").onclick = async () => {
   const res = await fetch("/api/start", {
     method:"POST", headers:{ "Content-Type":"application/json" },
     body: JSON.stringify({ url:$("url").value, seconds:$("seconds").value, mode:$("mode").value, quality:$("quality").value,
-                           max_clips:$("maxClips").value, browser:$("browser").value })
+                           max_clips:$("maxClips").value, browser:$("browser").value, part_label:$("partLabel").checked,
+                           channel_label:$("chanLabel").checked, channel_text:$("chanText").value })
   });
   const data = await res.json();
   if (!res.ok) $("err").textContent = data.error || "Something went wrong";
   poll();
 };
 $("stopBtn").onclick = () => fetch("/api/stop", { method:"POST" }).then(poll);
+if (!localStorage.getItem("pref_maxClips_reset")) {
+  localStorage.removeItem("pref_maxClips");
+  localStorage.setItem("pref_maxClips_reset", "1");
+}
 const PREFS = ["seconds", "mode", "quality", "maxClips", "browser"];
 PREFS.forEach(id => {
   const saved = localStorage.getItem("pref_" + id);
   if (saved !== null) $(id).value = saved;
   $(id).addEventListener("change", () => { localStorage.setItem("pref_" + id, $(id).value); updateQualityNote(); });
 });
+if (localStorage.getItem("pref_partLabel") !== null) $("partLabel").checked = localStorage.getItem("pref_partLabel") === "1";
+$("partLabel").addEventListener("change", () => localStorage.setItem("pref_partLabel", $("partLabel").checked ? "1" : "0"));
+if (localStorage.getItem("pref_chanLabel") !== null) $("chanLabel").checked = localStorage.getItem("pref_chanLabel") === "1";
+$("chanText").value = localStorage.getItem("pref_chanText") || "";
+$("chanLabel").addEventListener("change", () => localStorage.setItem("pref_chanLabel", $("chanLabel").checked ? "1" : "0"));
+$("chanText").addEventListener("input", () => localStorage.setItem("pref_chanText", $("chanText").value));
 function updateQualityNote() { $("qualityNote").style.display = Number($("quality").value) > 1080 ? "block" : "none"; }
 updateQualityNote();
 $("folderBtn").onclick = () => fetch("/api/open-folder", { method:"POST" });
@@ -710,6 +729,7 @@ function renderYouTube(yt) {
     $("ytEnabled").checked = yt.settings.youtube_enabled;
     $("ytReview").checked = yt.settings.require_review;
     $("ytSeo").checked = yt.settings.seo_mode;
+    $("ytPart").checked = yt.settings.part_in_title;
     $("ytSeoKw").value = yt.settings.seo_keywords;
     $("ytSched").checked = yt.settings.schedule_enabled;
     $("slotRows").innerHTML = "";
@@ -718,6 +738,7 @@ function renderYouTube(yt) {
     applyYtEnabled();
   }
   $("ytSetupNote").style.display = yt.has_client_secret ? "none" : "block";
+  $("chanText").placeholder = yt.channel ? `${yt.channel} (connected channel)` : "Type your channel name";
   $("ytAccount").textContent = yt.connecting ? "Waiting for Google login in the browser..."
     : yt.connected ? `Connected: ${yt.channel} · Today ${yt.uploads_today}/${yt.daily_limit} uploads${yt.queue ? ` · ${yt.queue} in queue` : ""}` : "Not connected";
   $("ytResumeBtn").style.display = yt.uploads_today >= yt.daily_limit ? "none" : "";

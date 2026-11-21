@@ -39,6 +39,7 @@ DEFAULT_SETTINGS = {
     "tags": "GTA, GTA 6, Gaming, Shorts",
     "privacy": "public",
     "category_id": "20",
+    "part_in_title": True,
     "schedule_enabled": True,
     "schedule_slots": DEFAULT_SLOTS,
 }
@@ -349,9 +350,25 @@ class YouTubeUploader:
                 "description": self.settings["description"].format_map(values),
                 "tags": self.settings["tags"],
             }
+        if self.settings["part_in_title"]:
+            meta["title"] = self._with_part(meta["title"], n)
         meta["title"] = self._clean_title(meta["title"], name)
         meta["description"] = self._clean_description(meta["description"])
         return meta
+
+    @staticmethod
+    def _with_part(title, n):
+        part = f"Part {n}"
+        if re.search(rf"\bpart\s*{n}\b", title, re.I):
+            return title
+        title = re.sub(rf"\s*#{n}\b", "", title)
+        match = re.search(r"\s#[^\W\d]", title)
+        head, tail = (title[:match.start()], title[match.start():]) if match else (title, "")
+        head = f"{head.rstrip()} – {part}"
+        # Drop trailing hashtags one by one rather than cutting the part number off at 100 chars.
+        while tail and len(head) + len(tail) > 100:
+            tail = tail[:tail.rfind(" #")] if " #" in tail else ""
+        return (head + tail)[:100]
 
     def _metadata(self, name):
         st = self.states.get(name) or {}

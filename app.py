@@ -79,6 +79,37 @@ def video_filter(mode, w, h):
     )
 
 
+PART_FONT = next((f for f in (r"C:\Windows\Fonts\arialbd.ttf", r"C:\Windows\Fonts\segoeuib.ttf",
+                               "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                               "/Library/Fonts/Arial Bold.ttf") if os.path.exists(f)), None)
+
+
+def part_label_filter(seconds, start_number, height):
+    font = PART_FONT.replace("\\", "/").replace(":", "\\:")
+    size = height // 16
+    sub_size = height // 34
+    style = "shadowx=3:shadowy=3:shadowcolor=black@0.6:bordercolor=black:x=(w-text_w)/2"
+    # The 0.01 s nudge keeps the first frame of each segment (t == k*seconds exactly) on the new number.
+    number = f"floor(t/{seconds}+0.01)+{start_number + 1}"
+    part = (f"drawtext=fontfile='{font}':text='Part #%{{eif\\:{number}\\:d}}'"
+            f":fontsize={size}:fontcolor=white:borderw={max(2, size // 12)}:{style}:y=h*0.07")
+    subscribe = (f"drawtext=fontfile='{font}':text='Please Subscribe for next Part'"
+                 f":fontsize={sub_size}:fontcolor=yellow:borderw={max(2, sub_size // 10)}:{style}"
+                 f":y=h*0.07+{int(size * 1.35)}")
+    return f"{part},{subscribe}"
+
+
+def channel_filter(text_path, height):
+    # Read from a file with expansion off so any channel name (quotes, colons, %) is drawn literally.
+    # Kept above the bottom ~15% that the YouTube Shorts player covers with the title and buttons.
+    font = PART_FONT.replace("\\", "/").replace(":", "\\:")
+    path = text_path.replace("\\", "/").replace(":", "\\:")
+    size = height // 26
+    return (f"drawtext=fontfile='{font}':textfile='{path}':expansion=none"
+            f":fontsize={size}:fontcolor=white:borderw={max(2, size // 10)}:bordercolor=black"
+            f":shadowx=3:shadowy=3:shadowcolor=black@0.6:x=(w-text_w)/2:y=h*0.84-text_h")
+
+
 def output_size(source_height):
     for min_height, size in OUTPUT_SIZES:
         if (source_height or 0) >= min_height:
@@ -110,6 +141,8 @@ class Recorder:
         self.error = ""
         self.browser = ""
         self.max_clips = 0
+        self.part_label = True
+        self.channel_text = ""
         self.output = ""
         self.log = deque(maxlen=60)
 
@@ -117,7 +150,7 @@ class Recorder:
         msg = re.sub(r"(https?://[^\s'\"/]+)[^\s'\"]{40,}", r"\1/…", str(msg))
         self.log.append(f"[{datetime.now():%H:%M:%S}] {msg}")
 
-    def start(self, url, seconds, mode, quality, max_clips=0):
+    def start(self, url, seconds, mode, quality, max_clips=0, part_label=True, channel_text=""):
         with self.lock:
             if self.thread and self.thread.is_alive():
                 raise RuntimeError("A recording is already running. Stop it first.")
@@ -126,6 +159,8 @@ class Recorder:
             self.title = ""
             self.output = ""
             self.max_clips = max_clips
+            self.part_label = part_label
+            self.channel_text = channel_text
             self.log.clear()
             self.state = "starting"
             self.thread = threading.Thread(
@@ -214,9 +249,17 @@ class Recorder:
             cmd += ["-map", "0:v:0", "-map", "0:a:0?"]
 
         out_pattern = os.path.join(self.session_dir, "clip_%04d.mp4")
+        vf = video_filter(mode, width, height)
+        if self.part_label and PART_FONT:
+            vf += "," + part_label_filter(seconds, start_number, height)
+        if self.channel_text and PART_FONT:
+            text_path = os.path.join(self.session_dir, "channel_name.txt")
+            with open(text_path, "w", encoding="utf-8") as fh:
+                fh.write(self.channel_text)
+            vf += "," + channel_filter(text_path, height)
         cmd += [
             "-filter_threads", str(os.cpu_count() or 4),
-            "-vf", video_filter(mode, width, height),
+            "-vf", vf,
             *encoder_args(width),
             "-force_key_frames", f"expr:gte(t,n_forced*{seconds})",
             "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
@@ -385,7 +428,11 @@ def api_start():
     recorder.browser = browser if browser in ("firefox", "chrome", "edge", "brave", "opera") else ""
     recorder.session_dir = None
     try:
-        recorder.start(url, seconds, mode, quality, max_clips)
+        channel_text = ""
+        if data.get("channel_label", True):
+            channel_text = (data.get("channel_text") or "").strip()[:60] or uploader.channel or ""
+        recorder.start(url, seconds, mode, quality, max_clips,
+                       part_label=bool(data.get("part_label", True)), channel_text=channel_text)
     except RuntimeError as e:
         return jsonify(error=str(e)), 409
     return jsonify(ok=True)
