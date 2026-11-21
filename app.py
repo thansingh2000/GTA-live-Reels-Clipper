@@ -601,8 +601,14 @@ def serve_clip(session, name):
     folder = os.path.join(CLIPS_DIR, os.path.basename(session))
     if not os.path.isdir(folder):
         abort(404)
-    as_attachment = request.args.get("dl") == "1"
-    return send_from_directory(folder, os.path.basename(name), as_attachment=as_attachment)
+    name = os.path.basename(name)
+    if request.args.get("dl") != "1":
+        return send_from_directory(folder, name)
+    try:
+        download_name = uploader.seo_filename(name) if folder == recorder.session_dir else name
+    except Exception:
+        download_name = name
+    return send_from_directory(folder, name, as_attachment=True, download_name=download_name)
 
 
 if __name__ == "__main__":

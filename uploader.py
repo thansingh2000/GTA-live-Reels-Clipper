@@ -352,23 +352,46 @@ class YouTubeUploader:
             }
         if self.settings["part_in_title"]:
             meta["title"] = self._with_part(meta["title"], n)
+            desc = meta["description"].rstrip()
+            if f"#Part{n}" not in desc:
+                last = desc.rsplit("\n", 1)[-1]
+                meta["description"] = desc + (f" #Part{n}" if last.startswith("#") else f"\n\n#Part{n}")
         meta["title"] = self._clean_title(meta["title"], name)
         meta["description"] = self._clean_description(meta["description"])
         return meta
 
     @staticmethod
     def _with_part(title, n):
-        part = f"Part {n}"
-        if re.search(rf"\bpart\s*{n}\b", title, re.I):
+        tag = f"#Part{n}"
+        if re.search(rf"{tag}\b", title, re.I):
             return title
         title = re.sub(rf"\s*#{n}\b", "", title)
         match = re.search(r"\s#[^\W\d]", title)
         head, tail = (title[:match.start()], title[match.start():]) if match else (title, "")
-        head = f"{head.rstrip()} – {part}"
+        if not re.search(rf"\bpart\s*{n}\b", head, re.I):
+            head = f"{head.rstrip()} – Part {n}"
+        hashtags = tail.split()
+        hashtags.insert(1 if hashtags else 0, tag)
         # Drop trailing hashtags one by one rather than cutting the part number off at 100 chars.
-        while tail and len(head) + len(tail) > 100:
-            tail = tail[:tail.rfind(" #")] if " #" in tail else ""
-        return (head + tail)[:100]
+        while hashtags and len(head) + len(" ".join(hashtags)) + 1 > 100:
+            hashtags.pop()
+        return (head + (" " + " ".join(hashtags) if hashtags else ""))[:100]
+
+    def seo_filename(self, name):
+        st = self.states.get(name) or {}
+        title = st.get("title")
+        if not title:
+            keywords = st.get("slot_keywords")
+            if keywords is None:
+                slots = self.free_slots(1)
+                keywords = slots[0]["keywords"] if slots else ""
+            title = self.default_metadata(name, slot_keywords=keywords)["title"]
+        n = self._clip_number(name)
+        title = re.sub(rf"#Part{n}\b", "", title, flags=re.I).replace("'", "").replace("’", "")
+        slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:90].rstrip("-")
+        if not re.search(rf"\bpart-{n}\b", slug):
+            slug = f"{slug}-part-{n}"
+        return f"{slug or 'clip'}{os.path.splitext(name)[1]}"
 
     def _metadata(self, name):
         st = self.states.get(name) or {}
