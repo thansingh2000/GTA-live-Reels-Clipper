@@ -14,6 +14,8 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 
+import seo
+
 SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload",
     "https://www.googleapis.com/auth/youtube.readonly",
@@ -29,10 +31,12 @@ DEFAULT_SETTINGS = {
     "auto_upload": False,
     "require_review": True,
     "daily_limit": 5,
+    "seo_mode": True,
+    "seo_keywords": "",
     "title_template": "GTA Live Highlight #{n} #Shorts",
     "description": "Clipped live from: {stream}\n\n#GTA #Gaming #Shorts",
     "tags": "GTA, GTA 6, Gaming, Shorts",
-    "privacy": "private",
+    "privacy": "public",
     "category_id": "20",
 }
 
@@ -225,7 +229,7 @@ class YouTubeUploader:
     def clip_state(self, name):
         return self.states.get(name)
 
-    def enqueue(self, name, title=None, description=None):
+    def enqueue(self, name, title=None, description=None, tags=None, thumbnail=None):
         with self.lock:
             self._sync_states(self.get_session_dir())
             st = self.states.get(name)
@@ -236,6 +240,10 @@ class YouTubeUploader:
                 new_state["title"] = self._clean_title(title, name)
             if description is not None:
                 new_state["description"] = self._clean_description(description)
+            if tags is not None:
+                new_state["tags"] = re.sub(r"[<>]", "", tags)
+            if thumbnail:
+                new_state["thumbnail"] = thumbnail
             self.states[name] = new_state
             self.queue.append(name)
             self.paused_reason = ""
@@ -294,22 +302,33 @@ class YouTubeUploader:
     def _clean_description(description):
         return (description or "").replace("<", "").replace(">", "")[:4900]
 
-    def default_metadata(self, name):
-        values = defaultdict(str, n=self._clip_number(name), stream=self.get_stream_title() or "",
-                             date=datetime.now().strftime("%d %b %Y"))
-        return {
-            "title": self._clean_title(self.settings["title_template"].format_map(values), name),
-            "description": self._clean_description(self.settings["description"].format_map(values)),
-        }
+    def default_metadata(self, name, variant=0):
+        n = self._clip_number(name)
+        stream = self.get_stream_title() or ""
+        if self.settings["seo_mode"]:
+            meta = seo.generate(n, stream, channel=self.channel, focus_keywords=self.settings["seo_keywords"],
+                                base_tags=self.settings["tags"], variant=variant)
+        else:
+            values = defaultdict(str, n=n, stream=stream, date=datetime.now().strftime("%d %b %Y"))
+            meta = {
+                "title": self.settings["title_template"].format_map(values),
+                "description": self.settings["description"].format_map(values),
+                "tags": self.settings["tags"],
+            }
+        meta["title"] = self._clean_title(meta["title"], name)
+        meta["description"] = self._clean_description(meta["description"])
+        return meta
 
     def _metadata(self, name):
-        defaults = self.default_metadata(name)
         st = self.states.get(name) or {}
-        tags = [t.strip() for t in self.settings["tags"].split(",") if t.strip()]
+        has_all = st.get("title") and "description" in st and "tags" in st
+        defaults = {} if has_all else self.default_metadata(name)
+        tags_text = st["tags"] if "tags" in st else defaults["tags"]
+        tags = [t.strip() for t in tags_text.split(",") if t.strip()]
         return {
             "snippet": {
                 "title": st.get("title") or defaults["title"],
-                "description": st.get("description", defaults["description"]),
+                "description": st["description"] if "description" in st else defaults["description"],
                 "tags": tags,
                 "categoryId": str(self.settings["category_id"]),
             },
@@ -362,8 +381,12 @@ class YouTubeUploader:
             try:
                 video_id = self._upload_file(os.path.join(session_dir, name), self._metadata(name), st)
                 self._count_upload()
-                st.update(status="done", video_id=video_id, url=f"https://youtube.com/shorts/{video_id}")
                 st.pop("error", None)
+                st.update(video_id=video_id, url=f"https://youtube.com/shorts/{video_id}")
+                if st.get("thumbnail"):
+                    st.update(status="thumbnail", progress=100)
+                    self._set_thumbnail(video_id, st)
+                st["status"] = "done"
                 self.log(f"Uploaded {name} → https://youtube.com/shorts/{video_id}")
             except HttpError as e:
                 reason = ""
@@ -391,8 +414,34 @@ class YouTubeUploader:
                 if session_dir == self.states_dir:
                     self._save_states()
 
+    def _set_thumbnail(self, video_id, st):
+        path = st["thumbnail"]
+        try:
+            if not os.path.exists(path):
+                raise RuntimeError("thumbnail file is missing")
+            media = MediaFileUpload(path, mimetype="image/jpeg")
+            self._youtube().thumbnails().set(videoId=video_id, media_body=media).execute()
+            st["thumbnail_status"] = "set"
+        except HttpError as e:
+            reason = ""
+            try:
+                reason = json.loads(e.content)["error"]["errors"][0]["reason"]
+            except Exception:
+                pass
+            if e.status_code == 403:
+                st["thumbnail_status"] = (
+                    "Not allowed — verify your channel (youtube.com/verify) to use custom thumbnails"
+                    if reason in ("forbidden", "insufficientPermissions", "") else f"Failed: {reason}"
+                )
+            else:
+                st["thumbnail_status"] = f"Failed: {e.status_code} {reason or e.reason}"
+        except Exception as e:
+            st["thumbnail_status"] = f"Failed: {e}"
+        if st["thumbnail_status"] != "set":
+            self.log(f"Thumbnail not set for {video_id}: {st['thumbnail_status']}")
+
     def _upload_file(self, path, body, st):
-        media = MediaFileUpload(path, mimetype="video/mp4", chunksize=8 * 1024 * 1024, resumable=True)
+        media = MediaFileUpload(path, mimetype="video/mp4", chunksize=1024 * 1024, resumable=True)
         request = self._youtube().videos().insert(part="snippet,status", body=body, media_body=media)
         response, failures = None, 0
         while response is None:
@@ -429,5 +478,6 @@ class YouTubeUploader:
             "uploads_today": self.uploads_today(),
             "daily_limit": self.daily_limit,
             "max_daily_limit": MAX_DAILY_LIMIT,
+            "next_reset": self._next_reset_local(),
             "settings": self.settings,
         }

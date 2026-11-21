@@ -40,7 +40,8 @@ Then open: http://127.0.0.1:5000
    - **Full gameplay + blur background** — full gameplay in the middle, blurred fill above and below (best for reels)
    - **Center crop** — the center of the frame, full screen
    - **Zoom fill** — zooms the frame to fill the screen
-4. **Source quality** — pick 720p on a slower PC.
+4. **Quality (max)** — up to **4K (2160p)**. Clips are exported at 1080x1920, 1440x2560 or 2160x3840 depending on what the stream really broadcasts (never upscaled). On live streams 4K works with Center crop / Zoom fill; with the blur style the tool uses 1440p so it can keep up in real time. The tool automatically uses your GPU encoder (NVIDIA NVENC → Intel Quick Sync → AMD AMF → CPU); the one in use is shown next to the log.
+5. **Stop after (clips)** — e.g. `10` stops recording automatically after exactly 10 clips. `0` = keep going until you press Stop.
 5. **YouTube cookies** — leave on "Auto"; the tool finds a working browser by itself.
 6. Press **Start**. Each clip shows up in the UI with a preview and is auto-downloaded.
    - The first time, the browser asks permission for "multiple downloads" → click **Allow**.
@@ -73,9 +74,15 @@ The login is saved in `token.json`, so you only do this once.
 
 - Turn on the **YouTube upload** switch. When it is off (the default), the tool works exactly like before: clips are only saved and downloaded, and no upload options or buttons are shown.
 - Set the **Daily upload limit** (1–50, default 5) right in the UI.
-- Set the **title template** (`{n}` = clip number, `{stream}` = stream title, `{date}` = today), description, tags and privacy.
+- **✨ SEO mode** (on by default) generates a keyword-optimized title (hook + main keyword + `#Shorts`), a description with keywords in the first lines, a call to action and hashtags, plus up to ~470 characters of tags. Keywords are detected from the stream title (e.g. GTA 6, Vice City, Supercars) or taken from **Focus keywords**. With SEO mode off, the **title / description templates** are used (`{n}` = clip number, `{stream}` = stream title, `{date}` = today).
+- **Privacy** defaults to **Public**.
 - Tick **Automatically upload every new clip** — every clip finished *after* you tick it is picked up.
-- **Review each clip before it uploads** (on by default): new clips wait as "👀 Waiting for review". Click **Review now** (or **Review** on a clip) to open a preview popup where you watch the clip, edit its title/description, and choose **✅ Approve & Upload**, **🚫 Skip this clip**, or **Decide later**. After each decision the next waiting clip opens automatically. Turn this option off to upload new clips without asking.
+- **Review each clip before it uploads** (on by default): new clips wait as "👀 Waiting for review". Click **Review now** (or **Review** on a clip) to open the preview popup:
+  - watch the clip, edit the title, description and tags (with YouTube's 100 / 500 character counters), or click **✨ New SEO idea** for a different version;
+  - **Thumbnail:** pause on the best moment and click **📸 Use current video frame**, or **🖼 Upload image** (JPEG/PNG, auto-resized under YouTube's 2 MB limit). Custom thumbnails require a phone-verified channel ([youtube.com/verify](https://www.youtube.com/verify)); for Shorts, YouTube may still show its own frame in the Shorts feed;
+  - **✅ Approve & Upload** shows a loader and progress bar until the upload finishes, then a success popup with **Open on YouTube**, **Copy link** and **Review next**. If it fails you get the error and **Back to edit & retry**;
+  - **🚫 Skip this clip** or **Decide later**.
+  Turn this option off to upload new clips without asking.
 - Any clip (including older or skipped ones) can be uploaded with its **⬆ Upload** button — it opens the same preview popup first. Failed uploads show a **Retry** button.
 - Each clip card shows its status: waiting for review, skipped, queued, uploading %, uploaded (with link), or the error.
 
@@ -107,6 +114,7 @@ The login is saved in `token.json`, so you only do this once.
 d:\tool
 ├── app.py               # Flask backend: yt-dlp + ffmpeg recording / clipping
 ├── uploader.py          # YouTube Data API upload queue
+├── seo.py               # SEO title / description / tags generator
 ├── templates\index.html # Web UI
 ├── requirements.txt
 ├── start.bat            # One-click setup + run

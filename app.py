@@ -1,3 +1,5 @@
+import base64
+import binascii
 import csv
 import os
 import re
@@ -29,21 +31,66 @@ def find_ffmpeg():
 FFMPEG = find_ffmpeg()
 
 AUTO_BROWSERS = ("brave", "firefox", "edge", "chrome", "opera")
+QUALITIES = (2160, 1440, 1080, 720, 480)
+# Vertical output size picked from the real source height (never upscale beyond the source).
+OUTPUT_SIZES = ((2160, (2160, 3840)), (1440, (1440, 2560)), (0, (1080, 1920)))
+LIVE_BLUR_MAX = (1440, 2560)
 
-W, H = 1080, 1920
-VIDEO_FILTERS = {
+ENCODER_ARGS = {
+    "h264_nvenc": ["-c:v", "h264_nvenc", "-preset", "p4", "-rc", "vbr", "-cq", "21", "-b:v", "0", "-pix_fmt", "yuv420p"],
+    "h264_qsv": ["-c:v", "h264_qsv", "-preset", "veryfast", "-global_quality", "21", "-forced_idr", "1", "-pix_fmt", "nv12"],
+    "h264_amf": ["-c:v", "h264_amf", "-quality", "speed", "-rc", "cqp", "-qp_i", "21", "-qp_p", "21", "-pix_fmt", "yuv420p"],
+}
+ENCODER_NAMES = {"h264_nvenc": "NVIDIA GPU (NVENC)", "h264_qsv": "Intel GPU (Quick Sync)",
+                 "h264_amf": "AMD GPU (AMF)", "libx264": "CPU (x264)"}
+
+
+def detect_encoder():
+    for name in ENCODER_ARGS:
+        try:
+            probe = subprocess.run(
+                [FFMPEG, "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=s=1280x720:d=0.2",
+                 *ENCODER_ARGS[name], "-f", "null", "-"],
+                capture_output=True, timeout=20, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            if probe.returncode == 0:
+                return name
+        except Exception:
+            pass
+    return "libx264"
+
+
+ENCODER = detect_encoder()
+
+
+def video_filter(mode, w, h):
+    if mode == "crop":
+        return f"fps=30,crop=ih*9/16:ih,scale={w}:{h}:flags=lanczos,setsar=1"
+    if mode == "zoom":
+        return f"fps=30,scale={w}:{h}:force_original_aspect_ratio=increase:flags=lanczos,crop={w}:{h},setsar=1"
     # Blurred copy of the frame fills the 9:16 background, full gameplay sits in the middle.
     # Background is blurred at 1/4 resolution then upscaled — same look, far less CPU.
-    "blur": (
+    return (
         f"fps=30,split[a][b];"
-        f"[a]scale={W // 4}:{H // 4}:force_original_aspect_ratio=increase,crop={W // 4}:{H // 4},"
-        f"boxblur=6:2,scale={W}:{H}[bg];"
-        f"[b]scale={W}:-2[fg];"
+        f"[a]scale={w // 4}:{h // 4}:force_original_aspect_ratio=increase,crop={w // 4}:{h // 4},"
+        f"boxblur=6:2,scale={w}:{h}[bg];"
+        f"[b]scale={w}:-2:flags=lanczos[fg];"
         f"[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1"
-    ),
-    "crop": f"fps=30,crop=ih*9/16:ih,scale={W}:{H},setsar=1",
-    "zoom": f"fps=30,scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1",
-}
+    )
+
+
+def output_size(source_height):
+    for min_height, size in OUTPUT_SIZES:
+        if (source_height or 0) >= min_height:
+            return size
+    return OUTPUT_SIZES[-1][1]
+
+
+def encoder_args(width):
+    if ENCODER != "libx264":
+        return ENCODER_ARGS[ENCODER]
+    preset = "ultrafast" if width > 1080 else "superfast"
+    return ["-c:v", "libx264", "-preset", preset, "-crf", "21", "-pix_fmt", "yuv420p"]
 
 
 def safe_name(text, limit=40):
@@ -62,18 +109,23 @@ class Recorder:
         self.session_dir = None
         self.error = ""
         self.browser = ""
+        self.max_clips = 0
+        self.output = ""
         self.log = deque(maxlen=60)
 
     def _log(self, msg):
+        msg = re.sub(r"(https?://[^\s'\"/]+)[^\s'\"]{40,}", r"\1/…", str(msg))
         self.log.append(f"[{datetime.now():%H:%M:%S}] {msg}")
 
-    def start(self, url, seconds, mode, quality):
+    def start(self, url, seconds, mode, quality, max_clips=0):
         with self.lock:
             if self.thread and self.thread.is_alive():
                 raise RuntimeError("A recording is already running. Stop it first.")
             self.stop_event.clear()
             self.error = ""
             self.title = ""
+            self.output = ""
+            self.max_clips = max_clips
             self.log.clear()
             self.state = "starting"
             self.thread = threading.Thread(
@@ -134,9 +186,22 @@ class Recorder:
     def _completed_count(self):
         return len(list_clips(self.session_dir))
 
+    @staticmethod
+    def _source_height(info):
+        formats = info.get("requested_formats") or [info]
+        return max((f.get("height") or 0) for f in formats) or info.get("height") or 0
+
+    def _output_size(self, info, mode):
+        size = output_size(self._source_height(info))
+        # 4K blur can't keep up with a live stream on most PCs; 1440p blur can.
+        if info.get("is_live") and mode == "blur" and size[0] > LIVE_BLUR_MAX[0]:
+            return LIVE_BLUR_MAX
+        return size
+
     def _build_cmd(self, info, seconds, mode, start_number):
         cmd = [FFMPEG, "-hide_banner", "-loglevel", "warning", "-stats", "-y"]
         formats = info.get("requested_formats") or [info]
+        width, height = self._output_size(info, mode)
         for f in formats:
             headers = "".join(f"{k}: {v}\r\n" for k, v in (f.get("http_headers") or {}).items())
             if headers:
@@ -150,10 +215,16 @@ class Recorder:
 
         out_pattern = os.path.join(self.session_dir, "clip_%04d.mp4")
         cmd += [
-            "-vf", VIDEO_FILTERS.get(mode, VIDEO_FILTERS["blur"]),
-            "-c:v", "libx264", "-preset", "superfast", "-crf", "22", "-pix_fmt", "yuv420p",
+            "-filter_threads", str(os.cpu_count() or 4),
+            "-vf", video_filter(mode, width, height),
+            *encoder_args(width),
             "-force_key_frames", f"expr:gte(t,n_forced*{seconds})",
-            "-c:a", "aac", "-b:a", "160k", "-ar", "44100",
+            "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+        ]
+        if self.max_clips:
+            remaining = self.max_clips - start_number
+            cmd += ["-t", str(remaining * seconds)]
+        cmd += [
             "-f", "segment",
             "-segment_time", str(seconds),
             "-segment_time_delta", "0.2",
@@ -184,9 +255,21 @@ class Recorder:
                     self._log(f"Title: {self.title} | Live: {'Yes' if is_live else 'No (regular video)'}")
                     self._log(f"Clips folder: {self.session_dir}")
 
-                cmd = self._build_cmd(info, seconds, mode, self._completed_count())
+                done = self._completed_count()
+                if self.max_clips and done >= self.max_clips:
+                    self._log(f"Reached the limit of {self.max_clips} clips.")
+                    break
+                cmd = self._build_cmd(info, seconds, mode, done)
+                src_h = self._source_height(info)
+                out_w, out_h = self._output_size(info, mode)
+                self.output = f"{src_h or '?'}p source → {out_w}x{out_h} · {ENCODER_NAMES[ENCODER]}"
+                if src_h and src_h < quality:
+                    self._log(f"Note: the stream only offers {src_h}p, so {quality}p is not available.")
+                if (out_w, out_h) == LIVE_BLUR_MAX and output_size(src_h)[0] > out_w:
+                    self._log("4K + blur is too heavy for live — using 1440p. Pick Center crop / Zoom fill for 4K live.")
                 self.state = "recording"
-                self._log(f"Recording started — a 9:16 clip will be created every {seconds}s.")
+                limit_txt = f", stopping after {self.max_clips} clips" if self.max_clips else ""
+                self._log(f"Recording started — a 9:16 clip every {seconds}s{limit_txt}. {self.output}")
                 self.proc = subprocess.Popen(
                     cmd,
                     stdin=subprocess.PIPE,
@@ -213,6 +296,9 @@ class Recorder:
 
                 if self.stop_event.is_set():
                     break
+                if self.max_clips and self._completed_count() >= self.max_clips:
+                    self._log(f"Done — {self.max_clips} clips created, recording stopped automatically.")
+                    break
                 if not is_live:
                     self._log("Video finished — all clips created.")
                     break
@@ -237,6 +323,9 @@ class Recorder:
             "error": self.error,
             "session": os.path.basename(self.session_dir) if self.session_dir else None,
             "folder": self.session_dir,
+            "max_clips": self.max_clips,
+            "output": self.output,
+            "encoder": ENCODER_NAMES[ENCODER],
             "log": list(self.log),
         }
 
@@ -286,11 +375,17 @@ def api_start():
     seconds = max(5, min(180, int(data.get("seconds", 30))))
     mode = data.get("mode", "blur")
     quality = int(data.get("quality", 1080))
+    if quality not in QUALITIES:
+        quality = 1080
+    try:
+        max_clips = max(0, min(1000, int(data.get("max_clips") or 0)))
+    except ValueError:
+        max_clips = 0
     browser = data.get("browser", "")
     recorder.browser = browser if browser in ("firefox", "chrome", "edge", "brave", "opera") else ""
     recorder.session_dir = None
     try:
-        recorder.start(url, seconds, mode, quality)
+        recorder.start(url, seconds, mode, quality, max_clips)
     except RuntimeError as e:
         return jsonify(error=str(e)), 409
     return jsonify(ok=True)
@@ -345,12 +440,31 @@ def api_youtube_meta():
     name, err = _clip_name_or_error(request.args.get("name"))
     if err:
         return err
-    meta = uploader.default_metadata(name)
+    variant = request.args.get("variant", type=int)
+    meta = uploader.default_metadata(name, variant or 0)
     st = uploader.clip_state(name) or {}
-    meta["title"] = st.get("title", meta["title"])
-    meta["description"] = st.get("description", meta["description"])
+    if variant is None:
+        for key in ("title", "description", "tags"):
+            if key in st:
+                meta[key] = st[key]
     meta["privacy"] = uploader.settings["privacy"]
+    meta["seo_mode"] = uploader.settings["seo_mode"]
     return jsonify(meta)
+
+
+def _save_thumbnail(name, data_url):
+    match = re.match(r"^data:image/(jpeg|jpg|png);base64,(.+)$", data_url or "", re.S)
+    if not match:
+        raise ValueError("Thumbnail must be a JPEG or PNG image.")
+    raw = base64.b64decode(match.group(2))
+    if len(raw) > 2 * 1024 * 1024:
+        raise ValueError("Thumbnail is larger than YouTube's 2 MB limit.")
+    folder = os.path.join(recorder.session_dir, "thumbs")
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, os.path.splitext(name)[0] + ".jpg")
+    with open(path, "wb") as fh:
+        fh.write(raw)
+    return path
 
 
 @app.post("/api/youtube/approve")
@@ -363,7 +477,14 @@ def api_youtube_approve():
         return jsonify(error="YouTube upload is disabled."), 400
     if not uploader.connected:
         return jsonify(error="Connect your YouTube account first."), 400
-    uploader.enqueue(name, title=data.get("title"), description=data.get("description"))
+    thumbnail = None
+    if data.get("thumbnail"):
+        try:
+            thumbnail = _save_thumbnail(name, data["thumbnail"])
+        except (ValueError, binascii.Error) as e:
+            return jsonify(error=str(e)), 400
+    uploader.enqueue(name, title=data.get("title"), description=data.get("description"),
+                     tags=data.get("tags"), thumbnail=thumbnail)
     return jsonify(ok=True)
 
 
@@ -401,5 +522,6 @@ def serve_clip(session, name):
 
 if __name__ == "__main__":
     print(f"ffmpeg: {FFMPEG}")
+    print(f"Video encoder: {ENCODER_NAMES[ENCODER]}")
     print("Open in browser: http://127.0.0.1:5000")
     app.run(host="127.0.0.1", port=5000, debug=False, threaded=True)
