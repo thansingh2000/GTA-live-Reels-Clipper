@@ -157,6 +157,7 @@ Custom thumbnails only work on a phone-verified channel: [youtube.com/verify](ht
 | **Automatically upload every new clip** | Picks up every clip made *after* you tick it. |
 | **Daily upload limit** | 1–50 (default 5). Extra clips wait in the queue for the next day. |
 | **Review each clip before it uploads** | New clips wait for your approval in the preview popup (recommended). |
+| **📅 Publish on a daily schedule (IST)** | Upload anytime — each clip is published at the next free slot (default 6:30 AM, 12:30 PM, 7:30 PM). Edit the slot times, themes and SEO keywords in the panel. |
 
 ### Review popup
 
@@ -165,15 +166,16 @@ Click **Review now** (banner above the clips), or **⬆ Upload / Review** on any
 1. Watch the clip.
 2. Edit the **title** (max 100 characters), **description** and **tags** (max 500 characters), or click **✨ New SEO idea** for another version.
 3. **Thumbnail (optional):** pause the video on the best moment → **📸 Use current video frame**, or **🖼 Upload image**.
-4. Click **✅ Approve & Upload**. A loader and progress bar show the upload; when it finishes you get **🎉 Uploaded to YouTube!** with **Open on YouTube**, **Copy link** and **Review next**.
-5. Or click **🚫 Skip this clip** / **Decide later**.
+4. **📅 Publish time:** the next free slot is pre-selected; pick another slot or **Publish immediately**. The SEO title follows the slot's theme.
+5. Click **✅ Approve & Upload**. A loader and progress bar show the upload; when it finishes you get **🎉 Uploaded to YouTube!** (or **📅 Uploaded & scheduled!** with the publish time) plus **Open on YouTube**, **Copy link** and **Review next**.
+6. Or click **🚫 Skip this clip** / **Decide later**.
 
 Each clip card always shows its status: waiting for review, queued, uploading %, uploaded (with link), skipped, or the error with **Retry**.
 
 ### YouTube limits to know
 
 - **About 6 uploads per day** with a new Google Cloud project (10,000 quota units per day, one upload ≈ 1,600). Keep the daily limit at **5**. The day resets at **midnight Pacific time ≈ 1:30 PM IST**.
-- Videos from an **unverified** Google app may be **locked to Private** by YouTube even if you choose Public. Change visibility in YouTube Studio, or apply for Google's API audit.
+- Videos from an **unverified** Google app may be **locked to Private** by YouTube even if you choose Public — this also stops **scheduled** videos from going public. Check one upload in YouTube Studio; if it says *"Private (locked)"* / restricted, apply for the free [YouTube API Services audit](https://support.google.com/youtube/contact/yt_api_form) so scheduling works automatically.
 - Uploading clips of **someone else's stream** can cause copyright claims. Only use streams you own or have permission for.
 
 ## 7. Everyday use (quick checklist)

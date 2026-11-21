@@ -4,7 +4,7 @@ import re
 import threading
 import time
 from collections import defaultdict, deque
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from google.auth.transport.requests import Request
@@ -15,6 +15,7 @@ from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 
 import seo
+from scheduler import DEFAULT_SLOTS, MIN_LEAD, Scheduler, clean_slots, from_key
 
 SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload",
@@ -38,6 +39,8 @@ DEFAULT_SETTINGS = {
     "tags": "GTA, GTA 6, Gaming, Shorts",
     "privacy": "public",
     "category_id": "20",
+    "schedule_enabled": True,
+    "schedule_slots": DEFAULT_SLOTS,
 }
 
 
@@ -47,6 +50,7 @@ class YouTubeUploader:
         self.token_path = os.path.join(base_dir, "token.json")
         self.settings_path = os.path.join(base_dir, "yt_settings.json")
         self.counts_path = os.path.join(base_dir, "upload_counts.json")
+        self.scheduler = Scheduler(os.path.join(base_dir, "schedule.json"))
         self.daily_counts = {}
         if os.path.exists(self.counts_path):
             with open(self.counts_path, encoding="utf-8") as fh:
@@ -190,6 +194,7 @@ class YouTubeUploader:
                 self.settings[key] = data[key]
         if self.settings["privacy"] not in ("private", "unlisted", "public"):
             self.settings["privacy"] = "private"
+        self.settings["schedule_slots"] = clean_slots(self.settings["schedule_slots"])
         try:
             limit = int(self.settings["daily_limit"])
         except (TypeError, ValueError):
@@ -229,7 +234,33 @@ class YouTubeUploader:
     def clip_state(self, name):
         return self.states.get(name)
 
-    def enqueue(self, name, title=None, description=None, tags=None, thumbnail=None):
+    # ---------- publish schedule ----------
+
+    @property
+    def schedule_active(self):
+        return bool(self.settings["schedule_enabled"] and self.settings["schedule_slots"])
+
+    def free_slots(self, count=6):
+        if not self.schedule_active:
+            return []
+        return self.scheduler.free_slots(self.settings["schedule_slots"], count)
+
+    def _book_slot(self, name, st, key=None):
+        slot = self.scheduler.book(self.settings["schedule_slots"], owner=f"{self.states_dir}|{name}", key=key)
+        if slot:
+            st.update(publish_at=slot["key"], slot_label=slot["label"], slot_keywords=slot["keywords"],
+                      publish_display=slot["display"])
+        else:
+            for key in ("publish_at", "slot_label", "slot_keywords", "publish_display"):
+                st.pop(key, None)
+
+    def _release_slot(self, st):
+        if st.get("publish_at"):
+            self.scheduler.release(st.pop("publish_at"))
+            for key in ("slot_label", "slot_keywords", "publish_display"):
+                st.pop(key, None)
+
+    def enqueue(self, name, title=None, description=None, tags=None, thumbnail=None, publish_at=None):
         with self.lock:
             self._sync_states(self.get_session_dir())
             st = self.states.get(name)
@@ -244,6 +275,8 @@ class YouTubeUploader:
                 new_state["tags"] = re.sub(r"[<>]", "", tags)
             if thumbnail:
                 new_state["thumbnail"] = thumbnail
+            if self.schedule_active and publish_at != "now":
+                self._book_slot(name, new_state, key=publish_at)
             self.states[name] = new_state
             self.queue.append(name)
             self.paused_reason = ""
@@ -302,11 +335,12 @@ class YouTubeUploader:
     def _clean_description(description):
         return (description or "").replace("<", "").replace(">", "")[:4900]
 
-    def default_metadata(self, name, variant=0):
+    def default_metadata(self, name, variant=0, slot_keywords=""):
         n = self._clip_number(name)
         stream = self.get_stream_title() or ""
         if self.settings["seo_mode"]:
-            meta = seo.generate(n, stream, channel=self.channel, focus_keywords=self.settings["seo_keywords"],
+            focus = ", ".join(k for k in (slot_keywords, self.settings["seo_keywords"]) if k)
+            meta = seo.generate(n, stream, channel=self.channel, focus_keywords=focus,
                                 base_tags=self.settings["tags"], variant=variant)
         else:
             values = defaultdict(str, n=n, stream=stream, date=datetime.now().strftime("%d %b %Y"))
@@ -322,7 +356,11 @@ class YouTubeUploader:
     def _metadata(self, name):
         st = self.states.get(name) or {}
         has_all = st.get("title") and "description" in st and "tags" in st
-        defaults = {} if has_all else self.default_metadata(name)
+        defaults = {} if has_all else self.default_metadata(name, slot_keywords=st.get("slot_keywords", ""))
+        status = {"privacyStatus": self.settings["privacy"], "selfDeclaredMadeForKids": False}
+        if st.get("publish_at"):
+            # YouTube only accepts publishAt on private videos; it flips them to public at that time.
+            status.update(privacyStatus="private", publishAt=st["publish_at"])
         tags_text = st["tags"] if "tags" in st else defaults["tags"]
         tags = [t.strip() for t in tags_text.split(",") if t.strip()]
         return {
@@ -332,10 +370,7 @@ class YouTubeUploader:
                 "tags": tags,
                 "categoryId": str(self.settings["category_id"]),
             },
-            "status": {
-                "privacyStatus": self.settings["privacy"],
-                "selfDeclaredMadeForKids": False,
-            },
+            "status": status,
         }
 
     # ---------- daily limit ----------
@@ -378,6 +413,10 @@ class YouTubeUploader:
                 continue
             st = self.states.setdefault(name, {})
             st.update(status="uploading", progress=0)
+            if st.get("publish_at") and from_key(st["publish_at"]) <= datetime.now(timezone.utc) + MIN_LEAD:
+                # The clip waited in the queue past its slot (e.g. daily limit) — move it to the next free one.
+                self._release_slot(st)
+                self._book_slot(name, st)
             try:
                 video_id = self._upload_file(os.path.join(session_dir, name), self._metadata(name), st)
                 self._count_upload()
@@ -387,7 +426,8 @@ class YouTubeUploader:
                     st.update(status="thumbnail", progress=100)
                     self._set_thumbnail(video_id, st)
                 st["status"] = "done"
-                self.log(f"Uploaded {name} → https://youtube.com/shorts/{video_id}")
+                when = f", scheduled for {st['publish_display']}" if st.get("publish_at") else ""
+                self.log(f"Uploaded {name} → https://youtube.com/shorts/{video_id}{when}")
             except HttpError as e:
                 reason = ""
                 try:
@@ -405,9 +445,11 @@ class YouTubeUploader:
                     self.log(f"Upload paused: {reason}")
                 else:
                     self._count_upload()
+                    self._release_slot(st)
                     st.update(status="error", error=f"{e.status_code}: {reason or e.reason}")
                     self.log(f"Upload failed for {name}: {st['error']}")
             except Exception as e:
+                self._release_slot(st)
                 st.update(status="error", error=str(e))
                 self.log(f"Upload failed for {name}: {e}")
             with self.lock:
@@ -479,5 +521,7 @@ class YouTubeUploader:
             "daily_limit": self.daily_limit,
             "max_daily_limit": MAX_DAILY_LIMIT,
             "next_reset": self._next_reset_local(),
+            "schedule_upcoming": self.scheduler.upcoming(),
+            "schedule_next_free": (self.free_slots(1) or [None])[0],
             "settings": self.settings,
         }

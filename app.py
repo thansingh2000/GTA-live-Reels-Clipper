@@ -441,14 +441,20 @@ def api_youtube_meta():
     if err:
         return err
     variant = request.args.get("variant", type=int)
-    meta = uploader.default_metadata(name, variant or 0)
+    slots = uploader.free_slots(6)
+    wanted = request.args.get("slot")
+    slot = None if wanted == "now" else next((s for s in slots if s["key"] == wanted), slots[0] if slots else None)
+    meta = uploader.default_metadata(name, variant or 0, slot_keywords=slot["keywords"] if slot else "")
     st = uploader.clip_state(name) or {}
-    if variant is None:
+    if variant is None and wanted is None:
         for key in ("title", "description", "tags"):
             if key in st:
                 meta[key] = st[key]
     meta["privacy"] = uploader.settings["privacy"]
     meta["seo_mode"] = uploader.settings["seo_mode"]
+    meta["schedule"] = uploader.schedule_active
+    meta["slots"] = slots
+    meta["slot"] = slot["key"] if slot else "now"
     return jsonify(meta)
 
 
@@ -484,7 +490,7 @@ def api_youtube_approve():
         except (ValueError, binascii.Error) as e:
             return jsonify(error=str(e)), 400
     uploader.enqueue(name, title=data.get("title"), description=data.get("description"),
-                     tags=data.get("tags"), thumbnail=thumbnail)
+                     tags=data.get("tags"), thumbnail=thumbnail, publish_at=data.get("publish_at"))
     return jsonify(ok=True)
 
 

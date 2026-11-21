@@ -59,6 +59,7 @@
   .modal { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px; display:flex; gap:18px; max-width:860px; width:100%; max-height:92vh; }
   .modal video { height:min(78vh, 640px); aspect-ratio:9/16; background:#000; border-radius:10px; }
   .modal-side { flex:1; display:flex; flex-direction:column; gap:12px; min-width:260px; overflow:auto; }
+  #rvDoneVideoTitle { white-space:pre-line; }
   .hint { color:var(--mut); font-size:12px; }
   .thumb-row { display:flex; gap:12px; align-items:flex-start; }
   .thumb-box { width:72px; aspect-ratio:9/16; border:1px dashed var(--line); border-radius:8px; display:flex; align-items:center; justify-content:center; text-align:center; font-size:10px; color:var(--mut); overflow:hidden; position:relative; flex-shrink:0; }
@@ -72,6 +73,12 @@
   .big-icon { font-size:54px; line-height:1; }
   .btn-link { background:var(--acc); color:#fff; padding:9px 16px; border-radius:8px; text-decoration:none; font-weight:600; font-size:13px; }
   .row { grid-template-columns: 1fr 1fr 1fr 0.7fr auto; }
+  .sched-box { margin-top:10px; padding:12px; border:1px solid var(--line); border-radius:10px; background:#12161d; }
+  .slot-row { display:grid; grid-template-columns: 110px 1fr 1.4fr 34px; gap:8px; margin-bottom:6px; align-items:center; }
+  .slot-row input { padding:7px 9px; font-size:13px; }
+  .slot-row button { padding:6px 0; background:#2b3140; color:#fff; font-size:12px; }
+  .slot-head span { font-size:11px; color:var(--mut); }
+  @media (max-width: 700px) { .slot-row { grid-template-columns: 90px 1fr 34px; } .slot-row > :nth-child(3) { display:none; } }
 
   @media (max-width: 900px) {
     main { padding:14px; gap:14px; }
@@ -222,6 +229,17 @@
       <input id="ytLimit" class="yt-field" data-key="daily_limit" type="number" min="1" max="50" step="1">
     </div>
     <label class="check"><input type="checkbox" id="ytReview" class="yt-field" data-key="require_review"> Review each clip before it uploads (watch preview, edit title, then confirm)</label>
+    <label class="check"><input type="checkbox" id="ytSched" class="yt-field" data-key="schedule_enabled"> 📅 <b>Schedule-based upload</b> (IST) — clips upload anytime, YouTube publishes each one at the next free slot</label>
+    <div id="schedOff" class="hint">Schedule off — clips are published right away with the privacy chosen above (normal upload).</div>
+    <div id="schedBox" class="sched-box">
+      <div class="slot-row slot-head"><span>Time (IST)</span><span>Theme</span><span>SEO keywords for this slot</span><span></span></div>
+      <div id="slotRows"></div>
+      <div class="status" style="margin-top:8px;">
+        <button class="ghost" id="addSlot">+ Add slot</button>
+        <span class="hint" id="schedNext"></span>
+      </div>
+      <div class="hint" id="schedUpcoming" style="margin-top:6px;"></div>
+    </div>
     <div class="note" id="ytLimitWarn" style="display:none;">
       A default Google Cloud project only has quota for about 6 uploads per day. Above that, uploads pause until Google's quota resets unless you got a quota increase.
     </div>
@@ -289,7 +307,11 @@
         </div>
         <span class="hint">Pause the video on the best moment, then "Use current frame". Custom thumbnails need a phone-verified channel.</span>
       </div>
-      <span class="hint">Privacy: <b id="rvPrivacy"></b> (change it in the YouTube settings)</span>
+      <div id="rvSlotBox">
+        <label>📅 Publish time</label>
+        <select id="rvSlot"></select>
+      </div>
+      <span class="hint" id="rvPrivacyHint">Privacy: <b id="rvPrivacy"></b> (change it in the YouTube settings)</span>
       <div class="err" id="rvErr"></div>
       <div style="display:flex; gap:10px; flex-wrap:wrap;">
         <button class="start" id="rvApprove">✅ Approve &amp; Upload</button>
@@ -390,7 +412,8 @@ function renderClips(session, clips) {
     if (!u) html = `<span>Not uploaded</span><button data-upload="${c.name}">⬆ Upload</button>`;
     else if (u.status === "review") html = `<span class="review">👀 Waiting for review</span><button data-upload="${c.name}">Review</button>`;
     else if (u.status === "rejected") html = `<span>🚫 Skipped</span><button data-upload="${c.name}">⬆ Upload</button>`;
-    else if (u.status === "queued") html = `<span>⏳ Queued for YouTube</span>`;
+    else if (u.status === "queued") html = `<span>⏳ Queued${u.publish_display ? " · 📅 " + u.publish_display.replace(" IST", "") : ""}</span>`;
+    else if (u.status === "done" && u.publish_at) html = `<span class="done" title="Goes public ${u.publish_display}">📅 ${u.publish_display.replace(" IST", "")}</span><a href="${u.url}" target="_blank">Open ↗</a>`;
     else if (u.status === "uploading") html = `<span>⬆ Uploading ${u.progress || 0}%</span>`;
     else if (u.status === "thumbnail") html = `<span>🖼 Setting thumbnail…</span>`;
     else if (u.status === "done") html = `<span class="done">✅ Uploaded</span><a href="${u.url}" target="_blank">Open ↗</a>`;
@@ -426,14 +449,36 @@ function setThumb(dataUrl) {
   $("rvThumbClear").style.display = dataUrl ? "" : "none";
 }
 
-function fillMeta(meta) {
+function fillMeta(meta, keepSlot) {
   $("rvTitle").value = meta.title;
   $("rvDesc").value = meta.description;
   $("rvTags").value = meta.tags || "";
   $("rvPrivacy").textContent = meta.privacy;
   $("rvSeoBtn").style.display = meta.seo_mode ? "" : "none";
+  reviewSeo = meta.seo_mode;
+  $("rvSlotBox").style.display = meta.schedule ? "" : "none";
+  if (meta.schedule && !keepSlot) {
+    $("rvSlot").innerHTML = meta.slots.map(s =>
+      `<option value="${s.key}">${s.display}${s.label ? " — " + s.label : ""}</option>`).join("")
+      + `<option value="now">Publish immediately (${meta.privacy})</option>`;
+    $("rvSlot").value = meta.slot;
+  }
+  updatePrivacyHint();
   updateCounts();
 }
+let reviewSeo = false;
+function updatePrivacyHint() {
+  const scheduled = $("rvSlotBox").style.display !== "none" && $("rvSlot").value !== "now";
+  $("rvPrivacyHint").innerHTML = scheduled
+    ? "Uploads as <b>Private</b> now — YouTube makes it <b>Public</b> automatically at the chosen time."
+    : `Privacy: <b>${$("rvPrivacy").textContent}</b> (change it in the YouTube settings)`;
+}
+$("rvSlot").addEventListener("change", async () => {
+  updatePrivacyHint();
+  if (!reviewSeo) return;
+  const res = await fetch(`/api/youtube/meta?name=${encodeURIComponent(reviewing)}&variant=${seoVariant}&slot=${encodeURIComponent($("rvSlot").value)}`);
+  if (res.ok) fillMeta(await res.json(), true);
+});
 
 async function openReview(name) {
   const res = await fetch(`/api/youtube/meta?name=${encodeURIComponent(name)}`);
@@ -472,8 +517,9 @@ $("rvTags").addEventListener("input", updateCounts);
 
 $("rvSeoBtn").onclick = async () => {
   seoVariant += 1;
-  const res = await fetch(`/api/youtube/meta?name=${encodeURIComponent(reviewing)}&variant=${seoVariant}`);
-  if (res.ok) fillMeta(await res.json());
+  const slot = $("rvSlotBox").style.display !== "none" ? `&slot=${encodeURIComponent($("rvSlot").value)}` : "";
+  const res = await fetch(`/api/youtube/meta?name=${encodeURIComponent(reviewing)}&variant=${seoVariant}${slot}`);
+  if (res.ok) fillMeta(await res.json(), true);
 };
 
 function canvasToJpeg(canvas) {
@@ -510,6 +556,7 @@ $("rvApprove").onclick = async () => {
   $("rvApprove").disabled = $("rvReject").disabled = true;
   const res = await postJSON("/api/youtube/approve", {
     name:reviewing, title:$("rvTitle").value, description:$("rvDesc").value, tags:$("rvTags").value, thumbnail:thumbData,
+    publish_at: $("rvSlotBox").style.display !== "none" ? $("rvSlot").value : null,
   });
   $("rvApprove").disabled = $("rvReject").disabled = false;
   if (!res.ok) { $("rvErr").textContent = (await res.json()).error; return; }
@@ -553,9 +600,10 @@ function updateUploadModal(clipsByName, yt) {
 
 function showDone(u) {
   const ok = u.status === "done";
-  $("rvDoneIcon").textContent = ok ? "🎉" : "❌";
-  $("rvDoneTitle").textContent = ok ? "Uploaded to YouTube!" : "Upload failed";
-  $("rvDoneVideoTitle").textContent = ok ? (u.title || $("rvTitle").value) : "";
+  $("rvDoneIcon").textContent = ok ? (u.publish_at ? "📅" : "🎉") : "❌";
+  $("rvDoneTitle").textContent = !ok ? "Upload failed" : u.publish_at ? "Uploaded & scheduled!" : "Uploaded to YouTube!";
+  $("rvDoneVideoTitle").textContent = !ok ? "" : (u.title || $("rvTitle").value)
+    + (u.publish_at ? `\nGoes public: ${u.publish_display}${u.slot_label ? " — " + u.slot_label : ""}` : "");
   $("rvDoneLinkRow").style.display = ok ? "flex" : "none";
   $("rvDoneLink").href = u.url || "#";
   $("rvDoneErr").textContent = ok ? "" : (u.error || "Unknown error");
@@ -600,7 +648,10 @@ function applyYtEnabled() {
   $("ytTitle").parentElement.style.display = seo ? "none" : "";
   $("ytDesc").parentElement.style.display = seo ? "none" : "";
   $("ytTagsLabel").textContent = seo ? "Extra tags added to every clip (comma separated)" : "Tags (comma separated)";
+  $("schedBox").style.display = $("ytSched").checked ? "" : "none";
+  $("schedOff").style.display = $("ytSched").checked ? "none" : "";
 }
+$("ytSched").addEventListener("change", applyYtEnabled);
 $("ytEnabled").addEventListener("change", applyYtEnabled);
 $("ytSeo").addEventListener("change", applyYtEnabled);
 $("ytLimit").addEventListener("change", () => {
@@ -609,8 +660,28 @@ $("ytLimit").addEventListener("change", () => {
   applyYtEnabled();
 });
 
+function slotRow(slot = { time:"", label:"", keywords:"" }) {
+  const row = document.createElement("div");
+  row.className = "slot-row";
+  row.innerHTML = `<input type="time" class="s-time"><input class="s-label" placeholder="e.g. GTA 6 Gameplay">
+    <input class="s-kw" placeholder="e.g. GTA 6, Gameplay"><button title="Remove slot">✕</button>`;
+  row.querySelector(".s-time").value = slot.time;
+  row.querySelector(".s-label").value = slot.label;
+  row.querySelector(".s-kw").value = slot.keywords;
+  row.querySelectorAll("input").forEach(i => i.addEventListener("input", queueSave));
+  row.querySelector("button").onclick = () => { row.remove(); queueSave(); };
+  return row;
+}
+function readSlots() {
+  return [...document.querySelectorAll("#slotRows .slot-row")].map(r => ({
+    time: r.querySelector(".s-time").value, label: r.querySelector(".s-label").value, keywords: r.querySelector(".s-kw").value,
+  })).filter(s => s.time);
+}
+$("addSlot").onclick = () => $("slotRows").appendChild(slotRow());
+function queueSave() { clearTimeout(saveTimer); saveTimer = setTimeout(saveYtSettings, 600); }
+
 function saveYtSettings() {
-  const body = {};
+  const body = { schedule_slots: readSlots() };
   document.querySelectorAll(".yt-field").forEach(f => body[f.dataset.key] = f.type === "checkbox" ? f.checked : f.value);
   fetch("/api/youtube/settings", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) });
 }
@@ -640,6 +711,9 @@ function renderYouTube(yt) {
     $("ytReview").checked = yt.settings.require_review;
     $("ytSeo").checked = yt.settings.seo_mode;
     $("ytSeoKw").value = yt.settings.seo_keywords;
+    $("ytSched").checked = yt.settings.schedule_enabled;
+    $("slotRows").innerHTML = "";
+    yt.settings.schedule_slots.forEach(s => $("slotRows").appendChild(slotRow(s)));
     $("ytLimit").value = yt.settings.daily_limit;
     applyYtEnabled();
   }
@@ -654,6 +728,11 @@ function renderYouTube(yt) {
   $("ytPaused").style.display = yt.paused ? "block" : "none";
   $("ytPausedTxt").textContent = yt.paused;
   $("ytErr").textContent = yt.settings.youtube_enabled ? yt.error : "";
+  const nf = yt.schedule_next_free;
+  $("schedNext").textContent = nf ? `Next free slot: ${nf.display}${nf.label ? " — " + nf.label : ""}` : "";
+  $("schedUpcoming").textContent = yt.schedule_upcoming.length
+    ? "Booked: " + yt.schedule_upcoming.map(u => `${u.display}${u.label ? " (" + u.label + ")" : ""}`).join(" · ")
+    : "No videos scheduled yet.";
 }
 
 async function poll() {
